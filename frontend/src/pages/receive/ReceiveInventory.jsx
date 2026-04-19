@@ -1,10 +1,92 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { ScanItemsModal, ManualEntryModal, BatchUploadModal } from "./ReceiveModals";
+import { supabase } from "../../lib/supabase";
+import { getErrorMessage } from "../../lib/errors";
+import { useAuth } from "../../contexts/AuthContext";
+import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
+
+function headerUserLabel(p) {
+  if (!p) return "";
+  const fn = (p.first_name || "").trim();
+  const ln = (p.last_name || "").trim();
+  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
+  return p.email || "";
+}
 
 export default function ReceiveInventory() {
+  const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState(null);
   const closeModal = useCallback(() => setActiveModal(null), []);
+  const [recentLoading, setRecentLoading] = useState(true);
+  const [recentError, setRecentError] = useState("");
+  const [recentReceipts, setRecentReceipts] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setRecentLoading(true);
+      setRecentError("");
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      try {
+        const { data: moves, error: mErr } = await supabase
+          .from("stock_movements")
+          .select(
+            "id, quantity, created_at, reference_type, reference_id, to_location, notes, inventory_items ( name, sku )"
+          )
+          .eq("movement_type", "in")
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(15);
+        if (mErr) throw mErr;
+        const list = moves ?? [];
+        const purchaseIds = [
+          ...new Set(
+            list.filter((m) => m.reference_type === "purchase" && m.reference_id).map((m) => m.reference_id)
+          ),
+        ];
+        let poById = new Map();
+        if (purchaseIds.length > 0) {
+          const { data: pos, error: pErr } = await supabase
+            .from("purchase_orders")
+            .select("id, po_number, suppliers ( name )")
+            .in("id", purchaseIds);
+          if (!pErr && pos) {
+            poById = new Map(pos.map((p) => [p.id, p]));
+          }
+        }
+        if (!cancelled) {
+          setRecentReceipts(
+            list.map((m) => {
+              const item = m.inventory_items;
+              const itemName = Array.isArray(item) ? item[0]?.name : item?.name;
+              const sku = Array.isArray(item) ? item[0]?.sku : item?.sku;
+              const po = m.reference_id && m.reference_type === "purchase" ? poById.get(m.reference_id) : null;
+              const poNum = po?.po_number;
+              const sup = po?.suppliers;
+              const supName = Array.isArray(sup) ? sup[0]?.name : sup?.name;
+              const sub = [poNum, supName].filter(Boolean).join(" • ") || (m.reference_type ?? "Inbound");
+              return {
+                id: m.id,
+                title: itemName || sku || "Item",
+                sub,
+                qty: m.quantity ?? 0,
+                loc: m.to_location || "—",
+                created_at: m.created_at,
+              };
+            })
+          );
+        }
+      } catch (e) {
+        if (!cancelled) setRecentError(getErrorMessage(e));
+      } finally {
+        if (!cancelled) setRecentLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="bg-surface text-on-surface min-h-dvh flex flex-col lg:h-dvh lg:max-h-dvh lg:overflow-hidden pb-24 md:pb-0">
@@ -18,11 +100,21 @@ export default function ReceiveInventory() {
               The Fluid Curator
             </Link>
             <nav className="hidden md:flex gap-6 items-center">
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Inventory</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Transfer</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Production</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Dispatch</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Audit</a>
+              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/inventory">
+                Inventory
+              </Link>
+              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/transfer">
+                Transfer
+              </Link>
+              <Link className="font-manrope tracking-tight font-semibold text-blue-600 border-b-2 border-blue-600 pb-0.5" to="/receive">
+                Receive
+              </Link>
+              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/deliver">
+                Deliver
+              </Link>
+              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/count">
+                Count
+              </Link>
             </nav>
           </div>
           <div className="flex items-center gap-4">
@@ -32,8 +124,8 @@ export default function ReceiveInventory() {
             <button className="p-2 text-slate-500 hover:text-blue-600 transition-all active:opacity-80">
               <span className="material-symbols-outlined">settings</span>
             </button>
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-high border-2 border-primary-container">
-              <img className="w-full h-full object-cover" alt="Manager profile avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBpER51ND7Mp_n0nTRrFbSifCTGRRrFZKuoWvnUt-6MCmhtLtg52L6GQD_H4_YTHUKabnGYJKpe9HUR9i3X1cwMWcYwz4ySdVtD1OsQq1XgvdeK1Q9XmdsAd4KlUU-MB0MYfyrmEsW654Xc9Xx3c1PTFhVgpfWoRGFXgyvVcvB5vHVgFocwg_Xa1xlDU8i70VfLJOdgxhxyYh7up4vq1ZPDZ_WSwwZ0l1IW7DaPLa3DgpR1_qzHL2DVQ0B0sLLLnM2wtHN9i6LUb9E" />
+            <div className="rounded-full border-2 border-primary-container bg-surface-container-high">
+              <UserAvatarOrIcon src={profile?.avatar_url} alt={headerUserLabel(profile)} size="md" />
             </div>
           </div>
         </div>
@@ -123,77 +215,42 @@ export default function ReceiveInventory() {
             </button>
           </div>
           <div className="space-y-2 overflow-y-auto min-h-0 flex-1 lg:overscroll-contain pr-0.5">
-            <div className="bg-surface-container-lowest p-2.5 sm:p-3 rounded-lg flex flex-row items-center justify-between gap-2 sm:gap-3 group hover:bg-surface-bright transition-colors">
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                <div className="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-primary text-xl">inventory_2</span>
+            {recentError ? (
+              <p className="text-xs text-error px-1 py-2">{recentError}</p>
+            ) : recentLoading ? (
+              <p className="text-xs text-on-surface-variant px-1 py-2">Loading recent receipts…</p>
+            ) : recentReceipts.length === 0 ? (
+              <p className="text-xs text-on-surface-variant px-1 py-2">
+                Walang inbound movement sa nakaraang 24 oras. Mag-insert ng <code className="text-[10px]">stock_movements</code> (type{" "}
+                <code className="text-[10px]">in</code>) sa Supabase para lumitaw dito ang real data.
+              </p>
+            ) : (
+              recentReceipts.map((r) => (
+                <div
+                  key={r.id}
+                  className="bg-surface-container-lowest p-2.5 sm:p-3 rounded-lg flex flex-row items-center justify-between gap-2 sm:gap-3 group hover:bg-surface-bright transition-colors"
+                >
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                    <div className="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-primary text-xl">inventory_2</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-on-surface text-sm leading-tight truncate">{r.title}</p>
+                      <p className="text-[10px] sm:text-xs text-on-surface-variant tracking-wide truncate">{r.sub}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="text-right shrink-0">
+                      <p className="font-bold text-on-surface text-xs sm:text-sm leading-none">+{r.qty}</p>
+                      <p className="text-[10px] text-on-surface-variant hidden sm:block">{r.loc}</p>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">
+                      Received
+                    </span>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="font-bold text-on-surface text-sm leading-tight truncate">Nordic Lounge Chair (OAK-22)</p>
-                  <p className="text-[10px] sm:text-xs text-on-surface-variant tracking-wide truncate">PO-99238 • NorthWoods Mfg.</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="text-right shrink-0">
-                  <p className="font-bold text-on-surface text-xs sm:text-sm leading-none">+45</p>
-                  <p className="text-[10px] text-on-surface-variant hidden sm:block">A-12</p>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">
-                  In Stock
-                </span>
-                <button type="button" className="p-1 text-on-surface-variant hover:text-primary hidden sm:block">
-                  <span className="material-symbols-outlined text-lg">more_vert</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-surface-container-lowest p-2.5 sm:p-3 rounded-lg flex flex-row items-center justify-between gap-2 sm:gap-3 group hover:bg-surface-bright transition-colors">
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                <div className="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-primary text-xl">conveyor_belt</span>
-                </div>
-                <div className="min-w-0">
-                  <p className="font-bold text-on-surface text-sm leading-tight truncate">Glass Pendant Light (GLS-400)</p>
-                  <p className="text-[10px] sm:text-xs text-on-surface-variant tracking-wide truncate">PO-99241 • Aurora Glass</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="text-right hidden sm:block">
-                  <p className="font-bold text-on-surface text-xs sm:text-sm leading-none">+12</p>
-                  <p className="text-[10px] text-on-surface-variant">QC</p>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed-variant text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">
-                  Pending QC
-                </span>
-                <button type="button" className="p-1 text-on-surface-variant hover:text-primary hidden sm:block">
-                  <span className="material-symbols-outlined text-lg">more_vert</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-surface-container-lowest p-2.5 sm:p-3 rounded-lg flex flex-row items-center justify-between gap-2 sm:gap-3 group hover:bg-surface-bright transition-colors">
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                <div className="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-primary text-xl">package_2</span>
-                </div>
-                <div className="min-w-0">
-                  <p className="font-bold text-on-surface text-sm leading-tight truncate">Textured Wool Rug (RUG-09)</p>
-                  <p className="text-[10px] sm:text-xs text-on-surface-variant tracking-wide truncate">PO-99245 • Textile Co.</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="text-right hidden sm:block">
-                  <p className="font-bold text-on-surface text-xs sm:text-sm leading-none">+200</p>
-                  <p className="text-[10px] text-on-surface-variant">Dock 4</p>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap">
-                  In Stock
-                </span>
-                <button type="button" className="p-1 text-on-surface-variant hover:text-primary hidden sm:block">
-                  <span className="material-symbols-outlined text-lg">more_vert</span>
-                </button>
-              </div>
-            </div>
+              ))
+            )}
           </div>
         </div>
       </main>
@@ -203,26 +260,26 @@ export default function ReceiveInventory() {
       <BatchUploadModal open={activeModal === "batch"} onClose={closeModal} />
 
       <nav className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-safe pt-2 bg-white/80 backdrop-blur-lg rounded-t-2xl shadow-[0_-8px_30px_rgb(0,0,0,0.04)] border-t border-slate-100">
-        <button className="flex flex-col items-center justify-center bg-blue-50 text-blue-700 rounded-xl px-4 py-1">
+        <div className="flex flex-col items-center justify-center bg-blue-50 text-blue-700 rounded-xl px-4 py-1">
           <span className="material-symbols-outlined text-primary">input</span>
           <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Receive</span>
-        </button>
-        <button className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50">
+        </div>
+        <Link to="/transfer" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
           <span className="material-symbols-outlined">sync_alt</span>
           <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Transfer</span>
-        </button>
-        <button className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50">
-          <span className="material-symbols-outlined">precision_manufacturing</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Work</span>
-        </button>
-        <button className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50">
+        </Link>
+        <Link to="/inventory" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
+          <span className="material-symbols-outlined">inventory_2</span>
+          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Stock</span>
+        </Link>
+        <Link to="/deliver" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
           <span className="material-symbols-outlined">local_shipping</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Ship</span>
-        </button>
-        <button className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50">
+          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Deliver</span>
+        </Link>
+        <Link to="/count" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
           <span className="material-symbols-outlined">fact_check</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Audit</span>
-        </button>
+          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Count</span>
+        </Link>
       </nav>
     </div>
   );

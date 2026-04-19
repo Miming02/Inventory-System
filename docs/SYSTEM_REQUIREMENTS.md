@@ -4,7 +4,7 @@
 **System name:** The Fluid Curator Inventory System (working title; same product as `database-schema.md` header)  
 **Version:** 1.0  
 **Scope:** Web application for inventory, procurement, warehouse operations, and role-based administration backed by Supabase (PostgreSQL).  
-**Authoritative implementation references:** `frontend/src/App.jsx`, `frontend/src/lib/roleAccess.js`, `backend/supabase/migrations/001_inventory_setup.sql`, `supabase/functions/invite-user/index.ts`, `database-schema.md` (logical model; physical auth uses `auth.users` + `public.profiles` per migration notes).  
+**Authoritative implementation references:** `frontend/src/App.jsx`, `frontend/src/lib/roleAccess.js`, `backend/supabase/migrations/001_inventory_setup.sql`, `backend/supabase/migrations/008_multi_tenancy.sql`, `supabase/functions/invite-user/index.ts`, `database-schema.md` (logical model; physical auth uses `auth.users` + `public.profiles` per migration notes).  
 **Process index:** [docs/README.md](./README.md) · [Checklist 0.1–0.7 ↔ repo](./CHECKLIST_COMPLIANCE.md)
 
 ---
@@ -70,7 +70,7 @@ Canonical role names **must** match database seeds (`roles.name`) and the UI nor
 | BR-11 | **Stock movements write:** Inserts require `Admin` or `Warehouse Staff` per RLS. |
 | BR-12 | **Audit:** Mutations on `profiles`, `inventory_items`, and `purchase_orders` write a row to `audit_logs` via `audit_trigger()` capturing operation, actor (`auth.uid()` when present), and row snapshots. |
 | BR-13 | **Invite users:** `invite-user` Edge Function requires valid Bearer JWT and Admin role; body requires `email`, `fullName`, `roleId`. |
-| BR-14 | **Tenancy:** Current product scope is **single-organization** (no `tenant_id` in schema). If multi-tenant behavior is required later, it becomes a separate BRD revision. |
+| BR-14 | **Tenancy:** Data is partitioned by **`public.organizations`** and **`profiles.organization_id`**. All tenant tables carry **`organization_id`**; RLS restricts reads/writes to `current_organization_id()`. New users default to the seeded **Default organization** unless **`organization_id`** is supplied in Auth metadata (e.g. Admin **invite-user**). Admins may create additional org rows via RPC **`create_organization(text)`** (then assign users in SQL/Studio until UI exists). |
 
 ---
 

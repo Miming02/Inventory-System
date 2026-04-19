@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../contexts/AuthContext";
+import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
 
 function AddUserModal({ open, onClose, roles, onInvited }) {
   const [formData, setFormData] = useState({
@@ -427,22 +428,7 @@ export default function Users() {
                       <tr key={user.id} className="hover:bg-surface-container-low/50 transition-colors group">
                         <td className="px-8 py-5">
                           <div className="flex items-center gap-4">
-                            {user.avatar_url ? (
-                              <img
-                                className="w-10 h-10 rounded-full object-cover"
-                                src={user.avatar_url}
-                                alt=""
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container font-bold">
-                                {displayName(user)
-                                  .split(/\s+/)
-                                  .map((w) => w[0])
-                                  .join("")
-                                  .slice(0, 2)
-                                  .toUpperCase() || "?"}
-                              </div>
-                            )}
+                            <UserAvatarOrIcon src={user.avatar_url} alt={displayName(user)} size="lg" />
                             <div>
                               <div className="font-bold text-on-surface">{displayName(user)}</div>
                               <div className="text-sm text-on-surface-variant">{user.email ?? "—"}</div>

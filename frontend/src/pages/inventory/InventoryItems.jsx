@@ -2,16 +2,19 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { getErrorMessage } from "../../lib/errors";
-
-const PROFILE_AVATAR =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuC3rGj7qr2aPKn-aDazX5JyZOWtjZSfFs7ynUSWFgOdXoZl8JSZtJnU8AmzO93YbmLDD3UagiwIkO-cYwGM-I96muKw1o6vgBx38gNLO-471HIM0W991dVDYARTJdZuy0wudiWdGoULieayLZjYzDoyB9OcUpRhkWnhCqMCJ577usPnDSsSVv_WKMpFtzeyiGUH9xBDZ3ZduLdbHL3FC7iNROxpi3w07e0Tw1YmMpNsguKvNINdfRZtlbKGZW660Fr7VVdrKABEM5s";
+import { useAuth } from "../../contexts/AuthContext";
+import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
+import { ItemThumbOrIcon } from "../../components/ItemThumbOrIcon";
 
 const PAGE_SIZE = 10;
-const PLACEHOLDER_IMG =
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect fill="#e2e8f0" width="96" height="96"/><text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui">No image</text></svg>`
-  );
+
+function headerUserLabel(p) {
+  if (!p) return "";
+  const fn = (p.first_name || "").trim();
+  const ln = (p.last_name || "").trim();
+  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
+  return p.email || "";
+}
 
 /** Strip characters that break PostgREST `ilike` patterns */
 function sanitizeSearch(raw) {
@@ -39,12 +42,12 @@ function mapInventoryRow(row) {
     barPct: `${barPctNum}%`,
     reorder: row.reorder_level != null ? String(row.reorder_level) : "—",
     reorderBadge: low ? `Low (≤${reorder})` : null,
-    image: row.image_url || PLACEHOLDER_IMG,
-    imageAlt: row.name ?? "Product",
+    image_url: row.image_url || null,
   };
 }
 
 export default function InventoryItems() {
+  const { profile } = useAuth();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -161,11 +164,11 @@ export default function InventoryItems() {
                 <span className="material-symbols-outlined">settings</span>
               </button>
             </div>
-            <img
-              alt="User profile"
-              className="w-8 h-8 rounded-full border border-outline-variant shrink-0"
-              data-alt="professional portrait of a middle-aged male curator in a minimalist art studio setting with soft natural lighting"
-              src={PROFILE_AVATAR}
+            <UserAvatarOrIcon
+              src={profile?.avatar_url}
+              alt={headerUserLabel(profile)}
+              size="md"
+              className="border border-outline-variant"
             />
           </div>
         </div>
@@ -275,14 +278,7 @@ export default function InventoryItems() {
                   <tr key={row.id} className="hover:bg-surface-container/30 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-surface-container-high overflow-hidden shrink-0">
-                          <img
-                            alt="Product"
-                            className="w-full h-full object-cover"
-                            data-alt={row.imageAlt}
-                            src={row.image}
-                          />
-                        </div>
+                        <ItemThumbOrIcon src={row.image_url} name={row.name} size="sm" />
                         <div>
                           <div className="font-semibold text-on-surface">{row.name}</div>
                           <div className="text-xs text-on-surface-variant">{row.subtitle}</div>

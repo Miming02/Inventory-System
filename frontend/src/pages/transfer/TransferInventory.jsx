@@ -1,13 +1,80 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { TransferScanModal, TransferManualModal, TransferBatchModal } from "./TransferModals";
+import { supabase } from "../../lib/supabase";
+import { getErrorMessage } from "../../lib/errors";
+import { useAuth } from "../../contexts/AuthContext";
+import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
 
-const HEADER_AVATAR =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuBBlwipVgEkcwPTY_CSqe4miixyxgfo7FWkT6b05wm1e2g2hgFru3wDKXzwM0IrV1Ck4-Mre2J9KDPYjX-NMGasAlMNIbrFU_6V6J-sUHcbwMGxSaQ9KXa1IWbJ95cB4COXX54DOW7Ne2JapfnBPoN7NAa1Nv1VAJtrDFih2wKQQBs6XkW2rhrA_3vQZFgWGKBk7A3R2dvVKw-ZfkDfubVeqwsLWkTT_oeo63pShLUWN-lvoA8swDmjDeoFd0uk0GqRgrRz588xgBg";
+function headerUserLabel(p) {
+  if (!p) return "";
+  const fn = (p.first_name || "").trim();
+  const ln = (p.last_name || "").trim();
+  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
+  return p.email || "";
+}
+
+function transferStatusBadge(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "completed") {
+    return (
+      <span className="px-2 py-0.5 bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300 rounded-full text-[10px] font-semibold whitespace-nowrap">
+        Completed
+      </span>
+    );
+  }
+  if (s === "in_transit") {
+    return (
+      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 rounded-full text-[10px] font-semibold whitespace-nowrap">
+        In transit
+      </span>
+    );
+  }
+  if (s === "cancelled") {
+    return (
+      <span className="px-2 py-0.5 bg-surface-container-high text-on-surface-variant rounded-full text-[10px] font-semibold whitespace-nowrap">
+        Cancelled
+      </span>
+    );
+  }
+  return (
+    <span className="px-2 py-0.5 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200 rounded-full text-[10px] font-semibold whitespace-nowrap">
+      {s || "Pending"}
+    </span>
+  );
+}
 
 export default function TransferInventory() {
+  const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState(null);
   const closeModal = useCallback(() => setActiveModal(null), []);
+  const [recentLoading, setRecentLoading] = useState(true);
+  const [recentError, setRecentError] = useState("");
+  const [recentRows, setRecentRows] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setRecentLoading(true);
+      setRecentError("");
+      try {
+        const { data, error } = await supabase
+          .from("stock_transfers")
+          .select("id, transfer_number, from_location, to_location, status, created_at, stock_transfer_items(count)")
+          .order("created_at", { ascending: false })
+          .limit(25);
+        if (error) throw error;
+        if (!cancelled) setRecentRows(data ?? []);
+      } catch (e) {
+        if (!cancelled) setRecentError(getErrorMessage(e));
+      } finally {
+        if (!cancelled) setRecentLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="bg-surface text-on-surface min-h-dvh flex flex-col lg:h-dvh lg:max-h-dvh lg:overflow-hidden pb-24 md:pb-0">
@@ -24,9 +91,9 @@ export default function TransferInventory() {
               <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/">
                 Dashboard
               </Link>
-              <a className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" href="#">
+              <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/inventory">
                 Inventory
-              </a>
+              </Link>
               <span className="font-manrope font-semibold text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 pb-0.5">
                 Transfer
               </span>
@@ -35,6 +102,9 @@ export default function TransferInventory() {
               </Link>
               <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/deliver">
                 Deliver
+              </Link>
+              <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/count">
+                Count
               </Link>
             </nav>
           </div>
@@ -54,8 +124,8 @@ export default function TransferInventory() {
             <button type="button" className="p-2 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
               <span className="material-symbols-outlined text-[22px]">settings</span>
             </button>
-            <div className="w-8 h-8 rounded-full overflow-hidden ml-1 ring-2 ring-surface-container-high shrink-0">
-              <img alt="Executive Profile" className="w-full h-full object-cover" src={HEADER_AVATAR} />
+            <div className="ml-1 shrink-0 ring-2 ring-surface-container-high rounded-full">
+              <UserAvatarOrIcon src={profile?.avatar_url} alt={headerUserLabel(profile)} size="md" />
             </div>
           </div>
         </div>
@@ -142,8 +212,8 @@ export default function TransferInventory() {
         <section className="flex flex-col flex-1 min-h-0 overflow-hidden bg-surface-container-low rounded-xl p-3 sm:p-4">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2 shrink-0">
             <div>
-              <h3 className="text-base font-bold font-manrope text-on-surface leading-tight">Recent Transfers</h3>
-              <p className="text-on-surface-variant text-[11px] sm:text-xs">Latest outbound movements</p>
+              <h3 className="text-base font-bold font-manrope text-on-surface leading-tight">Recent transfers</h3>
+              <p className="text-on-surface-variant text-[11px] sm:text-xs">Mula sa stock_transfers (pinakabago)</p>
             </div>
             <button type="button" className="text-primary font-semibold text-xs hover:underline inline-flex items-center gap-0.5">
               View Activity Log
@@ -163,28 +233,47 @@ export default function TransferInventory() {
                   </tr>
                 </thead>
                 <tbody className="text-xs sm:text-sm">
-                  <tr className="hover:bg-surface-container-low/50 transition-colors">
-                    <td className="px-3 sm:px-4 py-2 font-medium">TRF-89230</td>
-                    <td className="px-3 sm:px-4 py-2 truncate max-w-[8rem]">Main Warehouse A</td>
-                    <td className="px-3 sm:px-4 py-2 truncate max-w-[8rem]">Retail Center North</td>
-                    <td className="px-3 sm:px-4 py-2">42 Units</td>
-                    <td className="px-3 sm:px-4 py-2">
-                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 rounded-full text-[10px] font-semibold whitespace-nowrap">
-                        In Transit
-                      </span>
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-surface-container-low/50 transition-colors border-t border-surface-container/30">
-                    <td className="px-3 sm:px-4 py-2 font-medium">TRF-89228</td>
-                    <td className="px-3 sm:px-4 py-2 truncate max-w-[8rem]">East Distribution</td>
-                    <td className="px-3 sm:px-4 py-2 truncate max-w-[8rem]">Main Warehouse A</td>
-                    <td className="px-3 sm:px-4 py-2">115 Units</td>
-                    <td className="px-3 sm:px-4 py-2">
-                      <span className="px-2 py-0.5 bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300 rounded-full text-[10px] font-semibold whitespace-nowrap">
-                        Completed
-                      </span>
-                    </td>
-                  </tr>
+                  {recentError ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 sm:px-4 py-4 text-error text-xs">
+                        {recentError}
+                      </td>
+                    </tr>
+                  ) : recentLoading ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 sm:px-4 py-4 text-on-surface-variant text-xs">
+                        Loading…
+                      </td>
+                    </tr>
+                  ) : recentRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 sm:px-4 py-4 text-on-surface-variant text-xs">
+                        Walang transfer record. Gumawa sa <code className="text-[10px]">stock_transfers</code> +{" "}
+                        <code className="text-[10px]">stock_transfer_items</code> para lumitaw dito.
+                      </td>
+                    </tr>
+                  ) : (
+                    recentRows.map((t, i) => {
+                      const cnt = Array.isArray(t.stock_transfer_items) ? t.stock_transfer_items[0]?.count : null;
+                      const lineCount = cnt != null ? cnt : 0;
+                      return (
+                        <tr
+                          key={t.id}
+                          className={`hover:bg-surface-container-low/50 transition-colors ${i > 0 ? "border-t border-surface-container/30" : ""}`}
+                        >
+                          <td className="px-3 sm:px-4 py-2 font-medium">{t.transfer_number ?? t.id}</td>
+                          <td className="px-3 sm:px-4 py-2 truncate max-w-[10rem]" title={t.from_location}>
+                            {t.from_location}
+                          </td>
+                          <td className="px-3 sm:px-4 py-2 truncate max-w-[10rem]" title={t.to_location}>
+                            {t.to_location}
+                          </td>
+                          <td className="px-3 sm:px-4 py-2">{lineCount} line(s)</td>
+                          <td className="px-3 sm:px-4 py-2">{transferStatusBadge(t.status)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -225,7 +314,7 @@ export default function TransferInventory() {
         </button>
         <Link to="/deliver" className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 px-4 py-1 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl">
           <span className="material-symbols-outlined">local_shipping</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Ship</span>
+          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Deliver</span>
         </Link>
         <button type="button" className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 px-4 py-1 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl">
           <span className="material-symbols-outlined">fact_check</span>

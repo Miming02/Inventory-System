@@ -3,7 +3,7 @@
 **Backend:** Supabase  
 **Version:** 1.1  
 
-**Source of truth (DDL + RLS):** `backend/supabase/migrations/001_inventory_setup.sql` (keep this document aligned when migrations change).  
+**Source of truth (DDL + RLS):** `backend/supabase/migrations/001_inventory_setup.sql` plus later migrations (notably **`008_multi_tenancy.sql`** for `organizations` and `organization_id`). Keep this document aligned when migrations change.  
 **Related:** `docs/SYSTEM_REQUIREMENTS.md`, `docs/SYSTEM_ARCHITECTURE.md`.
 
 ---
@@ -30,12 +30,16 @@ CREATE TABLE roles (
 );
 ```
 
+### 2b. `organizations` Table (tenant / company)
+One row per company (or environment). Users link via `profiles.organization_id`. Seeded default id `a0000000-0000-4000-8000-000000000001` for existing installs; see migration `008_multi_tenancy.sql`.
+
 ### 3. `profiles` Table (application user row)
 Created for each auth signup via trigger `on_auth_user_created` → `handle_new_user()`.
 
 ```sql
 CREATE TABLE profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL REFERENCES organizations(id),
     email VARCHAR(255) UNIQUE,
     first_name VARCHAR(100) NOT NULL DEFAULT '',
     last_name VARCHAR(100) NOT NULL DEFAULT '',

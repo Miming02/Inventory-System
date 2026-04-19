@@ -11,7 +11,6 @@ import {
   canSeeLedger,
   canSeeMovementVelocity,
   canSeeOverviewCard,
-  canSeeRegionalHubs,
   canSeeStockShare,
   canShowReportsCard,
   normalizeRole,
@@ -19,15 +18,13 @@ import {
   roleDashboardSubtitle,
 } from "../../lib/roleAccess";
 import { NotificationBell } from "../../components/NotificationBell";
-
-const EXECUTIVE_AVATAR =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuAl1vk9F7RfgWZM_t-HHQpHI3L6Y8fXmpjBEPHYc0sQICv8jLjYpb3L8OiuJGEAZUvHLiy7WGfdbKsdDzsCt6cZbvzeH04HRARIk8YHMYO7xv2jlsKnVH4IgPvoMpSsPkw5BIfsmIBM0bTWcaePqC9m5I5JYvzlPHE33B3xdZBSYh_V6gcrR_mUzcETM_eRDPvynPoxUX5Gp3-FsjpFJjfwJhsJqdBydQVOmUzwJm4RjneVEWxoFMPZjKzHBveLX1PffNzqSLBYa5Q";
+import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
 
 const overviewCards = [
   {
     key: "total",
     icon: "inventory_2",
-    value: "12,842",
+    value: "0",
     label: "Total Items",
     iconBg: "bg-primary-fixed",
     iconClass: "text-on-primary-fixed-variant",
@@ -36,7 +33,7 @@ const overviewCards = [
   {
     key: "low",
     icon: "warning",
-    value: "14",
+    value: "0",
     label: "Low Stock",
     iconBg: "bg-tertiary-fixed",
     iconClass: "text-tertiary",
@@ -47,7 +44,7 @@ const overviewCards = [
   {
     key: "recv",
     icon: "download",
-    value: "450",
+    value: "0",
     label: "Received (24h)",
     iconBg: "bg-surface-container-high",
     iconClass: "text-primary",
@@ -56,8 +53,8 @@ const overviewCards = [
   {
     key: "dispatch",
     icon: "upload",
-    value: "312",
-    label: "Dispatched",
+    value: "0",
+    label: "Delivered (24h)",
     iconBg: "bg-surface-container-high",
     iconClass: "text-primary",
     variant: "simple"
@@ -65,7 +62,7 @@ const overviewCards = [
   {
     key: "hubs",
     icon: "location_on",
-    value: "08",
+    value: "0",
     label: "Active Hubs",
     iconBg: "bg-secondary-fixed",
     iconClass: "text-on-secondary-fixed-variant",
@@ -74,7 +71,7 @@ const overviewCards = [
   {
     key: "pending",
     icon: "verified_user",
-    value: "05",
+    value: "0",
     label: "Pending",
     iconBg: "bg-surface-container-high",
     iconClass: "text-on-surface-variant",
@@ -99,8 +96,8 @@ const expeditedOperations = [
   },
   {
     icon: "local_shipping",
-    title: "Dispatch Order",
-    text: "Ship curated inventory to active regional fulfillment points.",
+    title: "Deliver Order",
+    text: "Record outbound deliveries and ship curated inventory to regional fulfillment points.",
     to: "/deliver"
   },
     {
@@ -147,71 +144,21 @@ const chartBars = [
   { track: "h-[90%]", fill: "h-[65%]" }
 ];
 
-const ledgerLogs = [
-  {
-    user: "Marcus Chen",
-    action: "RECEIVE",
-    actionClass: "text-primary bg-primary-fixed",
-    sku: "SKU-9023-V",
-    qty: "+120",
-    time: "12:45 PM"
-  },
-  {
-    user: "Elena Rossi",
-    action: "TRANSFER",
-    actionClass: "text-secondary bg-secondary-fixed",
-    sku: "MOD-L4-W2",
-    qty: "45",
-    time: "10:12 AM"
-  },
-  {
-    user: "Sarah Jenkins",
-    action: "DISPATCH",
-    actionClass: "text-tertiary bg-tertiary-fixed",
-    sku: "CR-99-ALPHA",
-    qty: "-22",
-    time: "09:55 AM"
-  }
-];
+function profileDisplayName(p) {
+  if (!p) return "Team member";
+  const fn = (p.first_name || "").trim();
+  const ln = (p.last_name || "").trim();
+  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
+  return p.email || "Team member";
+}
 
-const regionalHubs = [
-  {
-    name: "Main Warehouse",
-    sub: "Primary Logistics Center",
-    units: "8,230",
-    barWidth: "75%",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAGkU--4189n5iahPe50Pz_Z7O8h6xKBu-KeHnNVhB025GlZj9Ht6GxGQD0jl6xhFat-luaWUrWN_j6d9Ag6wGjg_4MQI-DLFnr2zbdZzzFmFrYF5WUTK-RqwjmoRXlRmby2H3TLjg7TtdbtZzluKPgmOwGjyC__ey5JJDmroMtZnkk_FLoWRTVkaZRjvMgkVb_RrD0-4OnA9Yi76khr-ExDunZS5Mnl3DNsIS4xCXtujfNJHho9Rb4qcAHPEXd_-VrDnTuKmpHIMY",
-    imageAlt: "Modern industrial warehouse interior with neat high shelving systems, clean concrete floor, bright even lighting"
-  },
-  {
-    name: "Central Kitchen",
-    sub: "Hospitality Core",
-    units: "2,115",
-    barWidth: "45%",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBbkti447JZH-o31FXydKC8_Kr7s5H8JhXXVwcGV0YK9wg44CMaiTNd5m0CIhDfg4Wiy5jV-165ka_5vAdHbZxWNZH5XvyLMwB-i_SRnJ7Y5vkn4XD09mqSAWI6QDBm-_NoTYfUwNsfQS79HM-oYNUHW68jEIAKEDEhFpJPK6G0If_X1SQA9gtQf8BqqXZBnkNUkJIh0jRa6FDUwttu1HCNilNxr0f2nua77C9__XW4al_zxXwjaHUMeya9jNi6Vlcbr_QZloZNvbU",
-    imageAlt: "Professional commercial kitchen space with stainless steel counters, high-end equipment, sterile environment, bright lighting"
-  },
-  {
-    name: "North Transit Hub",
-    sub: "Regional Fulfillment",
-    units: "1,490",
-    barWidth: "20%",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuA-Ks1minw2dnfa-btkSoVw7D2V043XOVMFdNbYEucuLrqcVZHHEV0ASFQYNbUaBBaGMuh3KuYMnQk6bGEYdfgpOVI4r-saiU5V7bmlxz1pTPjKJy3Cu6DTWmO-r3QYJm44diowqsrueGpcVpa7M2RQnLyqYUgWtSO6QU6j2cxSxYAFiAFTOzNT9DoGvF334qfi5tg0Xy1JK_LXtlfp18kBmvMdwmx7_TC_FaqpnWcHRZ-nDvy1JBWxegvaGIEDs8JNhpYj9mtMub0",
-    imageAlt: "Logistics distribution hub with loading bays, shipping containers, and trucks at sunset with dramatic long shadows"
-  },
-  {
-    name: "R&D Lab",
-    sub: "Research Assets",
-    units: "1,007",
-    barWidth: "90%",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCKSYHtQEYVF0G_-6lQufferiTQcB9v51s5S6F8YbFNgOZh-T2u6X98W_8Z324RZqn9sHW6llurKcPMnRzGqyF4ki3xRpnnd_VmEICOCnYQ2QD7TRrwPNHJE-YNVqdHMFZv7DdmxNKlPkj5QS9DNeHPsdbblTdQMmI7rpsWC_Du4sZFfqDooeM26qR6UeJ_Ofr0Zb_7J7bAXyYrQkYodBLpB4dlLerBgjQJmlp9PXITTDb3-Ajtu5IrcxeBg2dIAVOWfp794gBO-qE",
-    imageAlt: "Clean laboratory setting with glass beakers and scientific equipment on white marble surface, teal and blue accents"
-  }
-];
+function movementActionLabel(movementType) {
+  const t = (movementType || "").toLowerCase();
+  if (t === "in") return "IN";
+  if (t === "out") return "OUT";
+  if (t === "transfer") return "TRANSFER";
+  return (movementType || "MOVE").toUpperCase();
+}
 
 function ExpeditedCard({ icon, title, text, to, primary }) {
   const className = primary
@@ -272,9 +219,12 @@ function ManagementCard({ icon, title, text, to }) {
 export default function AdminDashboard() {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [cards, setCards] = useState(overviewCards);
-  const [liveLedgerLogs, setLiveLedgerLogs] = useState(ledgerLogs);
+  const [liveLedgerLogs, setLiveLedgerLogs] = useState([]);
+  const [velocityBars, setVelocityBars] = useState(() => chartBars.map(() => ({ pct: 0 })));
+  const [stockShare, setStockShare] = useState({ totalUnits: 0, primaryPct: 0, secondaryPct: 0, primaryLabel: "—", secondaryLabel: "—" });
+  const [lowStockAlert, setLowStockAlert] = useState(null);
   const navigate = useNavigate();
-  const { logout, role } = useAuth();
+  const { logout, role, profile } = useAuth();
   const dropdownRef = useRef(null);
 
   const expeditedForRole = expeditedOperations.filter((op) => canAccessPath(role, op.to));
@@ -312,7 +262,7 @@ export default function AdminDashboard() {
 
       if (!r || keys.length === 0) {
         setCards(overviewCards);
-        setLiveLedgerLogs(ledgerLogs);
+        setLiveLedgerLogs([]);
         return;
       }
 
@@ -369,7 +319,7 @@ export default function AdminDashboard() {
             supabase
               .from("purchase_orders")
               .select("*", { count: "exact", head: true })
-              .eq("status", "draft")
+              .in("status", ["draft", "sent", "confirmed"])
               .then((res) => ({ key: "pending", res }))
           );
         }
@@ -377,12 +327,42 @@ export default function AdminDashboard() {
         const ledgerPromise = canSeeLedger(r)
           ? supabase
               .from("stock_movements")
-              .select("id,movement_type,quantity,created_at,item_id")
+              .select(
+                "id,movement_type,quantity,created_at,item_id,inventory_items(sku,name),profiles(first_name,last_name,email)"
+              )
               .order("created_at", { ascending: false })
-              .limit(3)
+              .limit(8)
           : Promise.resolve({ data: null, error: null });
 
-        const [taskResults, ledgerRes] = await Promise.all([Promise.all(tasks), ledgerPromise]);
+        const hubAggPromise = canSeeStockShare(r)
+          ? supabase.from("inventory_items").select("location, current_stock").not("location", "is", null).limit(4000)
+          : Promise.resolve({ data: null, error: null });
+
+        const velocityPromise =
+          canSeeMovementVelocity(r) || canSeeStockShare(r)
+            ? supabase
+                .from("stock_movements")
+                .select("created_at")
+                .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+                .limit(5000)
+            : Promise.resolve({ data: null, error: null });
+
+        const lowStockPromise = canSeeActiveAlerts(r)
+          ? supabase
+              .from("inventory_items")
+              .select("name, current_stock, reorder_level")
+              .lte("current_stock", 20)
+              .order("current_stock", { ascending: true })
+              .limit(1)
+          : Promise.resolve({ data: null, error: null });
+
+        const [taskResults, ledgerRes, hubRes, velRes, lowRes] = await Promise.all([
+          Promise.all(tasks),
+          ledgerPromise,
+          hubAggPromise,
+          velocityPromise,
+          lowStockPromise,
+        ]);
 
         if (cancelled) return;
 
@@ -424,8 +404,9 @@ export default function AdminDashboard() {
 
         if (!ledgerRes.error && ledgerRes.data?.length) {
           const mappedLogs = ledgerRes.data.map((entry) => {
-            const action = entry.movement_type?.toUpperCase() ?? "MOVEMENT";
-            const qty = entry.movement_type === "out" ? `-${Math.abs(entry.quantity ?? 0)}` : `+${Math.abs(entry.quantity ?? 0)}`;
+            const action = movementActionLabel(entry.movement_type);
+            const qty =
+              entry.movement_type === "out" ? `-${Math.abs(entry.quantity ?? 0)}` : `+${Math.abs(entry.quantity ?? 0)}`;
             const actionClass =
               action === "IN"
                 ? "text-primary bg-primary-fixed"
@@ -439,24 +420,86 @@ export default function AdminDashboard() {
                 timeLabel = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
               }
             }
+            const prof = entry.profiles;
+            const profileRow = Array.isArray(prof) ? prof[0] : prof;
+            const inv = entry.inventory_items;
+            const invRow = Array.isArray(inv) ? inv[0] : inv;
             return {
-              user: "System User",
+              id: entry.id,
+              user: profileDisplayName(profileRow),
               action,
               actionClass,
-              sku: entry.item_id ?? "N/A",
+              sku: invRow?.sku || invRow?.name || "—",
               qty,
               time: timeLabel,
             };
           });
           setLiveLedgerLogs(mappedLogs);
         } else if (!cancelled) {
-          setLiveLedgerLogs(ledgerLogs);
+          setLiveLedgerLogs([]);
+        }
+
+        if (!cancelled && !hubRes.error && hubRes.data?.length && canSeeStockShare(r)) {
+          const byLoc = new Map();
+          for (const row of hubRes.data) {
+            const loc = row.location || "Unknown";
+            byLoc.set(loc, (byLoc.get(loc) ?? 0) + Number(row.current_stock ?? 0));
+          }
+          const sorted = [...byLoc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+          if (sorted.length >= 1) {
+            const total = sorted.reduce((s, [, u]) => s + u, 0);
+            const a = sorted[0][1];
+            const b = sorted.length > 1 ? sorted[1][1] : 0;
+            setStockShare({
+              totalUnits: Math.round(total),
+              primaryPct: total ? Math.round((a / total) * 100) : 0,
+              secondaryPct: sorted.length > 1 && total ? Math.round((b / total) * 100) : 0,
+              primaryLabel: sorted[0][0],
+              secondaryLabel: sorted.length > 1 ? sorted[1][0] : "—",
+            });
+          }
+        } else if (!cancelled && canSeeStockShare(r)) {
+          setStockShare({ totalUnits: 0, primaryPct: 0, secondaryPct: 0, primaryLabel: "—", secondaryLabel: "—" });
+        }
+
+        if (!cancelled && !velRes.error && velRes.data?.length && canSeeMovementVelocity(r)) {
+          const counts = [0, 0, 0, 0, 0, 0, 0];
+          const start = new Date();
+          start.setHours(0, 0, 0, 0);
+          start.setDate(start.getDate() - 6);
+          const startMs = start.getTime();
+          const dayMs = 24 * 60 * 60 * 1000;
+          for (const row of velRes.data) {
+            if (!row.created_at) continue;
+            const t = new Date(row.created_at).getTime();
+            const idx = Math.floor((t - startMs) / dayMs);
+            if (idx >= 0 && idx < 7) counts[idx] += 1;
+          }
+          const max = Math.max(...counts, 1);
+          setVelocityBars(
+            counts.map((c) => ({
+              pct: Math.round((c / max) * 100),
+            }))
+          );
+        } else if (!cancelled && canSeeMovementVelocity(r)) {
+          setVelocityBars(chartBars.map(() => ({ pct: 0 })));
+        }
+
+        if (!cancelled && !lowRes.error && lowRes.data?.length && canSeeActiveAlerts(r)) {
+          const row = lowRes.data[0];
+          setLowStockAlert({
+            name: row.name ?? "Item",
+            current: row.current_stock ?? 0,
+            reorder: row.reorder_level ?? 20,
+          });
+        } else if (!cancelled) {
+          setLowStockAlert(null);
         }
       } catch (e) {
         console.error("Dashboard metrics load failed:", e);
         if (!cancelled) {
           setCards(overviewCards);
-          setLiveLedgerLogs(ledgerLogs);
+          setLiveLedgerLogs([]);
         }
       }
     };
@@ -521,14 +564,11 @@ export default function AdminDashboard() {
               <div className="relative ml-2" ref={dropdownRef}>
               <button
                 onClick={() => setShowUserDropdown(!showUserDropdown)}
-                className="w-10 h-10 rounded-full bg-surface-container-high overflow-hidden border-2 border-surface-bright shrink-0 hover:border-primary transition-colors"
+                className="shrink-0 rounded-full border-2 border-surface-bright bg-surface-container-high p-0 transition-colors hover:border-primary"
+                type="button"
+                aria-label="Account menu"
               >
-                <img
-                  alt="Executive profile avatar"
-                  className="w-full h-full object-cover"
-                  data-alt="Executive professional in business attire looking forward, soft high-key studio lighting, editorial style"
-                  src={EXECUTIVE_AVATAR}
-                />
+                <UserAvatarOrIcon src={profile?.avatar_url} alt={profileDisplayName(profile)} size="md" />
               </button>
 
               {/* User Dropdown Menu */}
@@ -675,9 +715,15 @@ export default function AdminDashboard() {
               </div>
             </div>
             <div className="flex-grow flex items-end gap-3 px-4 min-h-[200px]">
-              {chartBars.map((bar, i) => (
-                <div key={i} className={`flex-grow ${bar.track} bg-primary/10 rounded-t-xl relative ${i === 0 ? "group" : ""}`}>
-                  <div className={`absolute inset-x-0 bottom-0 ${bar.fill} bg-primary rounded-t-xl`} />
+              {velocityBars.map((bar, i) => (
+                <div
+                  key={i}
+                  className={`flex-grow h-[200px] bg-primary/10 rounded-t-xl relative ${i === 0 ? "group" : ""}`}
+                >
+                  <div
+                    className="absolute inset-x-0 bottom-0 bg-primary rounded-t-xl transition-all"
+                    style={{ height: `${Math.max(4, bar.pct ?? 0)}%` }}
+                  />
                 </div>
               ))}
             </div>
@@ -725,24 +771,26 @@ export default function AdminDashboard() {
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-extrabold tracking-tighter headline">12.8k</span>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Units</span>
+                <span className="text-3xl font-extrabold tracking-tighter headline">
+                  {stockShare.totalUnits > 0 ? stockShare.totalUnits.toLocaleString() : "—"}
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Units (top locations)</span>
               </div>
             </div>
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs font-semibold">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-primary" />
-                  <span>Central Warehouse</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-3 h-3 rounded-full bg-primary shrink-0" />
+                  <span className="truncate">{stockShare.primaryLabel}</span>
                 </div>
-                <span className="text-on-surface-variant">75%</span>
+                <span className="text-on-surface-variant shrink-0">{stockShare.primaryPct}%</span>
               </div>
               <div className="flex items-center justify-between text-xs font-semibold">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-secondary" />
-                  <span>Regional Hubs</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-3 h-3 rounded-full bg-secondary shrink-0" />
+                  <span className="truncate">{stockShare.secondaryLabel}</span>
                 </div>
-                <span className="text-on-surface-variant">25%</span>
+                <span className="text-on-surface-variant shrink-0">{stockShare.secondaryPct}%</span>
               </div>
             </div>
           </div>
@@ -781,7 +829,7 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody className="divide-y divide-surface-container">
                   {liveLedgerLogs.map((log) => (
-                    <tr key={`${log.user}-${log.time}`} className="group hover:bg-surface transition-colors">
+                    <tr key={log.id} className="group hover:bg-surface transition-colors">
                       <td className="py-5">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-600" aria-hidden />
@@ -805,83 +853,41 @@ export default function AdminDashboard() {
           <div className="bg-surface-container-low rounded-3xl p-8 flex flex-col gap-6">
             <h2 className="text-2xl font-extrabold tracking-tight font-headline">Active Alerts</h2>
             <div className="space-y-4">
-              <div className="bg-surface-container-lowest p-5 rounded-2xl border-l-4 border-tertiary shadow-sm">
-                <div className="flex items-start gap-4">
-                  <span className="material-symbols-outlined text-tertiary">priority_high</span>
-                  <div>
-                    <h4 className="text-sm font-bold mb-1">Low Stock: Liquid Nitro</h4>
-                    <p className="text-xs text-on-surface-variant">Current levels at 5 units. Minimum threshold is 20 units.</p>
-                    {canActOnProcurementAlerts(role) ? (
-                      <button type="button" className="mt-3 text-[10px] font-bold uppercase tracking-widest text-primary hover:text-primary-container">
-                        Order Now
-                      </button>
-                    ) : (
-                      <p className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
-                        Contact procurement to reorder
+              {lowStockAlert ? (
+                <div className="bg-surface-container-lowest p-5 rounded-2xl border-l-4 border-tertiary shadow-sm">
+                  <div className="flex items-start gap-4">
+                    <span className="material-symbols-outlined text-tertiary">priority_high</span>
+                    <div>
+                      <h4 className="text-sm font-bold mb-1">Low stock: {lowStockAlert.name}</h4>
+                      <p className="text-xs text-on-surface-variant">
+                        Current: {lowStockAlert.current} units · Reorder at {lowStockAlert.reorder} units (threshold ≤20 in this view).
                       </p>
-                    )}
+                      {canActOnProcurementAlerts(role) ? (
+                        <Link
+                          to="/purchase-orders"
+                          className="mt-3 inline-block text-[10px] font-bold uppercase tracking-widest text-primary hover:text-primary-container"
+                        >
+                          Open purchase orders
+                        </Link>
+                      ) : (
+                        <p className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
+                          Contact procurement to reorder
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="bg-surface-container-lowest p-5 rounded-2xl border-l-4 border-primary shadow-sm">
-                <div className="flex items-start gap-4">
-                  <span className="material-symbols-outlined text-primary">info</span>
-                  <div>
-                    <h4 className="text-sm font-bold mb-1">Audit Scheduled</h4>
-                    <p className="text-xs text-on-surface-variant">Warehouse Alpha physical count begins in 2 hours.</p>
-                  </div>
+              ) : (
+                <div className="bg-surface-container-lowest p-5 rounded-2xl border border-outline-variant/20 text-sm text-on-surface-variant">
+                  No low-stock rows matched (current_stock ≤ 20). Add inventory or adjust reorder levels in Supabase.
                 </div>
-              </div>
-              <div className="bg-surface-container-lowest p-5 rounded-2xl border-l-4 border-on-surface-variant/30 shadow-sm opacity-60">
-                <div className="flex items-start gap-4">
-                  <span className="material-symbols-outlined text-on-surface-variant">check_circle</span>
-                  <div>
-                    <h4 className="text-sm font-bold mb-1">Backup Completed</h4>
-                    <p className="text-xs text-on-surface-variant">Database synchronization with cloud storage successful.</p>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
           )}
         </div>
         )}
 
-        {canSeeRegionalHubs(role) && (
-        <section className="space-y-6">
-          <h2 className="text-lg font-bold tracking-tight text-on-surface-variant uppercase font-headline">Regional Hub Summary</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {regionalHubs.map((hub) => (
-              <div
-                key={hub.name}
-                className="group bg-surface-container-lowest p-6 rounded-2xl border border-outline-variant/10 hover:border-primary/20 transition-all hover:shadow-xl hover:shadow-on-surface/5"
-              >
-                <div className="h-32 w-full rounded-xl overflow-hidden mb-6 bg-surface-container">
-                  <img
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                    src={hub.image}
-                    alt={hub.name}
-                    data-alt={hub.imageAlt}
-                  />
-                </div>
-                <div className="flex justify-between items-end">
-                  <div>
-                    <h3 className="font-bold text-lg font-headline">{hub.name}</h3>
-                    <p className="text-xs font-semibold text-on-surface-variant">{hub.sub}</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-xl font-extrabold headline">{hub.units}</span>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Units</span>
-                  </div>
-                </div>
-                <div className="mt-6 h-1 w-full bg-surface-container-high rounded-full overflow-hidden">
-                  <div className="h-full bg-primary rounded-full" style={{ width: hub.barWidth }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-        )}
       </main>
 
       <footer className="w-full py-12 bg-transparent">

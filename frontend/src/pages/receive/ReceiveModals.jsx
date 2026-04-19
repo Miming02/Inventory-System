@@ -3,40 +3,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import { uploadAttachment } from "../../lib/storageUpload";
 import { getErrorMessage } from "../../lib/errors";
 
-const PREVIEW_ITEMS = [
-  {
-    sku: "LP-1029",
-    name: "Premium Leather Pack",
-    qty: "x24",
-    loc: "Aisle 4B",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCEbbuuRIBxnMCFsmFEDHBCl98r0km7KNF5dVP5V25cRER6-k7XVpaaNiKf4mddYMmFI4bcMEnBDgq5oS_xg_IvxyeF8UicjyFL0V-Q7_3YL18awq-vYTSEGy2kZALsbYxqQyf-OjvxJ1vBff0J-6KEheGlklWj-Gl9etFbPqbx5JUZxu-NpZbby6XXL7vTEd-46VOZ0SnJkkzH5Ff97BsR153qgIDzOfw9nDrwavIcm4x3B8mSeiWh3QVqNXlRPtGL3o7ZPJaW5tA",
-    imgAlt: "Backpack Item",
-    dataAlt:
-      "Close-up of a high-end minimalist leather backpack on a plain light background with studio lighting",
-    borderAccent: false
-  },
-  {
-    sku: "VS-001",
-    name: "Velocity Sneakers (R)",
-    qty: "x50",
-    loc: "Main Floor",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuBO8Zy180hQKQrlNfoxrrIKGCHkK1f2SgRj09e4U2VsZe_kJvIuVHfvSSGqBBcXuzaDio5zaYfQgIOWU22MyUiajK-5YCZaaWM8Vv_kSQbqZdDE_HiAw9Udph3-AgwfqD4fXZGn3gC8jo1CvX2Yjw8IAtgARYYfTn6gF1arfWYs8D1qQZ1cX7njMgAUXMiq1V_Uq8_WpR_B63BuP56lTFKZqHOsYG5RsHWKom845oe5oGv9ab9SLB-YSMkL5vqtOzjh37a7TlzoxjM",
-    imgAlt: "Red Shoe Item",
-    dataAlt: "Commercial product shot of a sleek red athletic sneaker on a white background with sharp shadows",
-    borderAccent: false
-  },
-  {
-    sku: "CS-W-02",
-    name: "Curator Series Chrono",
-    qty: "x12",
-    loc: "Safe A",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuAcLN10Fn0HdmvPo6BA4scbO3C13VthTm_yHHGZSWqyo57UAYMVLgB7qhtwKBgBK7Yt9SETL13pDKFNRH-A9NAadR2zCI3TDJ__yVxFBpg-8UZEJCH3C_zyuSXQ5dS6UeCDgc7CXQedAx-4DOLLCD_vAfMJRwcBEH7hp0_SBVwGj0r9fVI5HjzmMchIOC5qvWqKAxI-Jnxt1c4A6W8IlX6poReQI4IZJsWJXiTWvIdllC0VYC9c541ZYc5f7lQtsE6e8ae__7eEwfM",
-    imgAlt: "Watch Item",
-    dataAlt: "Elegant luxury watch with a silver band sitting on a soft grey fabric with diffuse natural lighting",
-    borderAccent: true
-  }
-];
-
 function useModalA11y(open, onClose) {
   useEffect(() => {
     if (!open) return undefined;
@@ -135,7 +101,7 @@ export function ScanItemsModal({ open, onClose }) {
                 <input
                   className="w-full bg-surface-container-highest border-none rounded-2xl py-3 px-4 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all font-medium"
                   type="text"
-                  defaultValue="Alexander Curator"
+                  placeholder="Name"
                 />
               </div>
             </div>
@@ -190,58 +156,10 @@ export function ScanItemsModal({ open, onClose }) {
             <h3 className="font-bold text-sm tracking-tight font-headline">Recently Scanned</h3>
           </div>
           <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
-            <div className="bg-surface-container-lowest p-4 rounded-2xl shadow-sm border border-white/40">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">UNIT #9022</span>
-                <span className="text-[10px] text-on-surface-variant">2m ago</span>
-              </div>
-              <p className="text-xs font-bold text-on-surface mb-1">High-Precision Flux Capacitors</p>
-              <div className="flex justify-between items-center text-[10px] text-on-surface-variant">
-                <span>Qty: 24</span>
-                <span className="flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[12px] text-primary">location_on</span>
-                  A4-B
-                </span>
-              </div>
-            </div>
-            <div className="bg-surface-container-lowest p-4 rounded-2xl shadow-sm border border-white/40">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">UNIT #1105</span>
-                <span className="text-[10px] text-on-surface-variant">15m ago</span>
-              </div>
-              <p className="text-xs font-bold text-on-surface mb-1">Industrial Grade Sealant</p>
-              <div className="flex justify-between items-center text-[10px] text-on-surface-variant">
-                <span>Qty: 100</span>
-                <span className="flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[12px] text-primary">location_on</span>
-                  A2-D
-                </span>
-              </div>
-            </div>
-            <div className="bg-surface-container-lowest p-4 rounded-2xl shadow-sm border border-white/40">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-tertiary-fixed text-on-tertiary-fixed-variant rounded-full">ALERT</span>
-                <span className="text-[10px] text-on-surface-variant">1h ago</span>
-              </div>
-              <p className="text-xs font-bold text-on-surface mb-1">Thermal Insulation Panel</p>
-              <div className="flex justify-between items-center text-[10px] text-on-surface-variant">
-                <span>Qty: 5</span>
-                <span className="flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[12px] text-tertiary">warning</span>
-                  Overstock
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 pt-6 border-t border-outline-variant/20">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-xs font-medium text-on-surface-variant">Session Total</span>
-              <span className="text-lg font-extrabold text-primary font-headline">129 Items</span>
-            </div>
-            <div className="h-1 bg-primary-fixed-dim rounded-full overflow-hidden">
-              <div className="h-full bg-primary w-2/3" />
-            </div>
-            <p className="text-[10px] text-on-surface-variant mt-2 text-center">Batch Processing: 66% Complete</p>
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Walang session list hangga&apos;t hindi pa naka-wire ang scanner flow sa database. Ang Recent Receipts sa Receive page ay
+              kumukuha ng tunay na inbound movements mula sa Supabase.
+            </p>
           </div>
         </div>
       </div>
@@ -373,46 +291,18 @@ export function ManualEntryModal({ open, onClose }) {
         <div className="w-full md:w-[380px] bg-surface-container-low p-8 flex flex-col shrink-0 min-h-0">
           <div className="mb-6 flex justify-between items-center">
             <h3 className="font-headline font-bold text-lg text-on-surface">Entry Preview</h3>
-            <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-bold">3 Items</span>
+            <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-xs font-bold">0 Items</span>
           </div>
           <div className="flex-grow space-y-4 overflow-y-auto pr-2 min-h-0">
-            {PREVIEW_ITEMS.map((item) => (
-              <div
-                key={item.sku}
-                className={`bg-surface-container-lowest p-4 rounded-2xl shadow-sm space-y-3 ${item.borderAccent ? "border-l-4 border-primary" : ""}`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex gap-3 min-w-0">
-                    <div className="w-10 h-10 bg-surface-container-high rounded-xl flex items-center justify-center overflow-hidden shrink-0">
-                      <img
-                        alt={item.imgAlt}
-                        data-alt={item.dataAlt}
-                        className="w-full h-full object-cover"
-                        src={item.img}
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="text-sm font-bold text-on-surface">{item.name}</h4>
-                      <p className="text-[10px] text-on-surface-variant uppercase font-semibold">SKU: {item.sku}</p>
-                    </div>
-                  </div>
-                  <span className="text-sm font-bold text-primary shrink-0">{item.qty}</span>
-                </div>
-                <div className="flex justify-between items-center text-[10px] text-on-surface-variant font-medium">
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-xs">location_on</span> {item.loc}
-                  </span>
-                  <button type="button" className="text-tertiary-container hover:underline">
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Magdadagdag ng line items dito kapag naka-submit na ang form tungo sa <code className="text-[10px]">stock_movements</code> / inventory
+              update. Walang mock products — pumunan muna ang form sa kaliwa.
+            </p>
           </div>
           <div className="mt-8 space-y-3 shrink-0">
             <div className="flex justify-between items-center px-1">
               <span className="text-sm text-on-surface-variant">Total Quantity</span>
-              <span className="text-lg font-headline font-bold text-on-surface">86 Units</span>
+              <span className="text-lg font-headline font-bold text-on-surface">0 Units</span>
             </div>
             <button
               type="button"

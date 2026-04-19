@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useDistinctLocations } from "../../lib/useDistinctLocations";
 
 function useModalA11y(open, onClose) {
   useEffect(() => {
@@ -16,33 +17,9 @@ function useModalA11y(open, onClose) {
   }, [open, onClose]);
 }
 
-const MANUAL_PREVIEW = [
-  {
-    name: "Premium Leather Pack",
-    sku: "SKU-990-LP",
-    qty: "12",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuBpOByavR4LwFqKnHYl3gkxViYN_zuBmNp3EWqNGdbS8ZBajnHD72babkY9gzYDsKNwYFFT_oWBGhXIpQuQsfrxc_kKV56bWYzFZQZHPPDXZ9UJNUZKxnKju4Kd0h7Vc8yt5qZNogwJs2D65b9a8VP7O02lsMSDjk-h-eOx3fB3F40vY-5zqbe2Nw5WBdoLPnuOaA2JZXTM9omx5Jca__uGBf67ScqcSqFcO7dx--jsdtHWQlB8O-EMBIx4lLFq33fsIoIIUXqMpqU",
-    dataAlt:
-      "close-up of a high-end black textured leather backpack with metallic accents on a minimalist grey background"
-  },
-  {
-    name: "Velocity Sneakers",
-    sku: "SKU-882-VS",
-    qty: "45",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuDYYBkqa8ijs_GD1HmBCG0KvzFeI_ZUIwYDU_Jbf6nstzv8C_CbM9AQRH7NFVrxBc4Tx_rpk8yh6t6hR_Oe4Ou_drdGq5US2hGb_WzCPX-DzQ_v-6HfptV3RY-5aIZ1wALjbGNnI0vcnE5KhqPhBkOiV9nQOW533VdnSXVyuaX9RhejImdS3w9t89CQMjT2JbFYp0NlvsQhkZ2pNnaf-KB1035Nd0k04bvYi8ouVbARF5ravJ7SrJ9Q_BfvdEgbdqHYKKWCVj6GTv4",
-    dataAlt: "sleek red high-performance athletic running shoe floating in a clean studio light environment"
-  },
-  {
-    name: "Essential Watch",
-    sku: "SKU-771-EW",
-    qty: "8",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuBMQMWzAuSakO9UT3fJr0xX9YHWZam2guEt7pw_5Gut7MNaencYYrytzBzkzzWbD897eGbNSkJ6nBQJGkE_U3lQbIw_atJo10aKYkI1wSmvReY4DKnnb7SXm29Aw7TOgaXFMEAoyfa2jBQb7rIIlPGdPjcJnTHkLOBmaMSKFC6WHJ4C5wDhfolCtWJqXDzc-VPpW5h1CC4P6ZbFtKuShmmvTAg_y2ty2cAnh9yY3Clc0rdZGZzSnIbkoc3BZkKRS_88HAzCYSPm4C8",
-    dataAlt: "minimalist white wristwatch with a silver dial and brown leather strap on a soft white marble surface"
-  }
-];
-
 export function DeliverScanModal({ open, onClose }) {
   useModalA11y(open, onClose);
+  const locations = useDistinctLocations(open);
   if (!open) return null;
 
   return (
@@ -62,7 +39,7 @@ export function DeliverScanModal({ open, onClose }) {
             <h1 id="deliver-scan-title" className="text-3xl font-extrabold tracking-tighter text-on-surface font-headline">
               Scan Items
             </h1>
-            <p className="text-on-surface-variant font-medium text-sm mt-1">Delivery Session ID: DC-9842-X</p>
+            <p className="text-on-surface-variant font-medium text-sm mt-1">Deliver session — data mula sa DB pag naka-submit na</p>
           </div>
           <button
             type="button"
@@ -130,11 +107,14 @@ export function DeliverScanModal({ open, onClose }) {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-[0.75rem] font-bold uppercase tracking-widest text-on-surface-variant px-1">Delivered By</label>
+                <label className="text-[0.75rem] font-bold uppercase tracking-widest text-on-surface-variant px-1">Ship-from location</label>
                 <select className="w-full px-4 py-4 bg-surface-container-highest border-none rounded-xl focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest appearance-none transition-all">
-                  <option>Marcus Thorne (Lead)</option>
-                  <option>Sarah Jenkins</option>
-                  <option>Alex Riviera</option>
+                  <option value="">Select…</option>
+                  {locations.map((loc) => (
+                    <option key={`del-${loc}`} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-2">
@@ -154,74 +134,12 @@ export function DeliverScanModal({ open, onClose }) {
           <div className="w-full md:w-[400px] bg-surface-container-low p-8 border-l border-white/20 overflow-y-auto min-h-0 flex flex-col">
             <div className="flex justify-between items-end mb-6">
               <h2 className="text-lg font-bold tracking-tight text-on-surface font-headline">Scanned Items</h2>
-              <span className="text-xs font-bold text-primary bg-primary-fixed px-2 py-1 rounded-full">4 Total</span>
+              <span className="text-xs font-bold text-primary bg-primary-fixed px-2 py-1 rounded-full">0 Total</span>
             </div>
             <div className="space-y-3 flex-1 min-h-0">
-              <div className="group bg-surface-container-lowest p-4 rounded-xl flex items-center justify-between shadow-sm transition-all hover:shadow-md">
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-on-secondary-container">inventory_2</span>
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-on-surface truncate">Precision Lens X-1</h4>
-                    <p className="text-xs text-on-surface-variant">Qty: 12 units</p>
-                  </div>
-                </div>
-                <button type="button" className="text-outline hover:text-tertiary transition-colors p-1 rounded-full hover:bg-tertiary-fixed opacity-0 group-hover:opacity-100 shrink-0" aria-label="Remove">
-                  <span className="material-symbols-outlined">delete</span>
-                </button>
-              </div>
-              <div className="group bg-surface-container-lowest p-4 rounded-xl flex items-center justify-between shadow-sm transition-all hover:shadow-md">
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-on-secondary-container">construction</span>
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-on-surface truncate">Steel Mount Base</h4>
-                    <p className="text-xs text-on-surface-variant">Qty: 4 units</p>
-                  </div>
-                </div>
-                <button type="button" className="text-outline hover:text-tertiary transition-colors p-1 rounded-full hover:bg-tertiary-fixed opacity-0 group-hover:opacity-100 shrink-0" aria-label="Remove">
-                  <span className="material-symbols-outlined">delete</span>
-                </button>
-              </div>
-              <div className="group bg-surface-container-lowest p-4 rounded-xl flex items-center justify-between shadow-sm transition-all hover:shadow-md border border-tertiary/10">
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-tertiary-fixed-dim flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-on-tertiary-fixed-variant">warning</span>
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-on-surface truncate">Titanium Alloy Tube</h4>
-                    <p className="text-xs text-on-tertiary-fixed-variant">Qty: 25 units (Overstock)</p>
-                  </div>
-                </div>
-                <button type="button" className="text-outline hover:text-tertiary transition-colors p-1 rounded-full hover:bg-tertiary-fixed opacity-0 group-hover:opacity-100 shrink-0" aria-label="Remove">
-                  <span className="material-symbols-outlined">delete</span>
-                </button>
-              </div>
-              <div className="group bg-surface-container-lowest p-4 rounded-xl flex items-center justify-between shadow-sm transition-all hover:shadow-md">
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-on-secondary-container">package</span>
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-on-surface truncate">Ceramic Buffer Pad</h4>
-                    <p className="text-xs text-on-surface-variant">Qty: 100 units</p>
-                  </div>
-                </div>
-                <button type="button" className="text-outline hover:text-tertiary transition-colors p-1 rounded-full hover:bg-tertiary-fixed opacity-0 group-hover:opacity-100 shrink-0" aria-label="Remove">
-                  <span className="material-symbols-outlined">delete</span>
-                </button>
-              </div>
-            </div>
-            <div className="mt-8 pt-8 border-t border-outline-variant/20 shrink-0">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Capacity Used</span>
-                <span className="text-xs font-bold text-primary">64%</span>
-              </div>
-              <div className="h-1.5 w-full bg-primary-fixed rounded-full overflow-hidden">
-                <div className="h-full bg-primary rounded-full w-[64%]" />
-              </div>
+              <p className="text-sm text-on-surface-variant leading-relaxed">
+                Walang mock lines. Outbound ay <code className="text-xs">stock_movements</code> na <code className="text-xs">movement_type = out</code> kapag naka-wire na ang submit.
+              </p>
             </div>
           </div>
         </div>
@@ -247,6 +165,7 @@ export function DeliverScanModal({ open, onClose }) {
 
 export function DeliverManualModal({ open, onClose }) {
   useModalA11y(open, onClose);
+  const locations = useDistinctLocations(open);
   if (!open) return null;
 
   return (
@@ -266,7 +185,7 @@ export function DeliverManualModal({ open, onClose }) {
             <h2 id="deliver-manual-title" className="text-2xl font-extrabold tracking-tight text-on-surface mb-2 font-headline">
               Manual Item Entry
             </h2>
-            <p className="text-on-surface-variant text-sm font-medium">Precision data entry for new stock deliveries.</p>
+            <p className="text-on-surface-variant text-sm font-medium">Manual deliver lines — i-save sa outbound movements kapag naka-wire na.</p>
           </div>
           <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -306,12 +225,15 @@ export function DeliverManualModal({ open, onClose }) {
               </div>
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant ml-1">Location / Delivery Address</label>
-              <input
-                className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all"
-                placeholder="Warehouse Section A / Bay 4"
-                type="text"
-              />
+              <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant ml-1">Ship-from location</label>
+              <select className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all appearance-none">
+                <option value="">Select…</option>
+                {locations.map((loc) => (
+                  <option key={`dm-${loc}`} value={loc}>
+                    {loc}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
@@ -346,34 +268,16 @@ export function DeliverManualModal({ open, onClose }) {
         <div className="w-full md:w-[400px] bg-surface-container-low p-10 flex flex-col shrink-0 min-h-0">
           <div className="flex items-center justify-between mb-8">
             <h3 className="text-xl font-bold tracking-tight font-headline text-on-surface">Entry Preview</h3>
-            <span className="bg-secondary-container text-on-secondary-container px-3 py-1 rounded-full text-xs font-bold">3 ITEMS</span>
+            <span className="bg-secondary-container text-on-secondary-container px-3 py-1 rounded-full text-xs font-bold">0 ITEMS</span>
           </div>
           <div className="flex-grow space-y-4 overflow-y-auto min-h-0">
-            {MANUAL_PREVIEW.map((item) => (
-              <div
-                key={item.sku}
-                className="bg-surface-container-lowest p-5 rounded-2xl flex gap-4 items-start shadow-sm hover:shadow-md transition-shadow"
-              >
-                <div className="h-12 w-12 rounded-xl bg-surface-container-high overflow-hidden shrink-0 flex items-center justify-center">
-                  <img alt={item.name} data-alt={item.dataAlt} className="w-full h-full object-cover" src={item.img} />
-                </div>
-                <div className="flex-grow min-w-0">
-                  <p className="font-bold text-on-surface truncate">{item.name}</p>
-                  <p className="text-xs font-medium text-on-surface-variant tracking-wider">
-                    {item.sku} • Qty: {item.qty}
-                  </p>
-                  <button type="button" className="text-[10px] uppercase tracking-widest font-bold text-tertiary mt-2 hover:underline">
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
+            <p className="text-xs text-on-surface-variant leading-relaxed">Walang mock preview. Queue ay local/API sa susunod.</p>
           </div>
           <div className="mt-8 space-y-4 shrink-0">
             <div className="pt-6 border-t border-outline-variant/20">
               <div className="flex justify-between items-center mb-6">
                 <span className="text-sm font-medium text-on-surface-variant">Batch Total</span>
-                <span className="text-lg font-extrabold text-on-surface font-headline">65 Items</span>
+                <span className="text-lg font-extrabold text-on-surface font-headline">0 Items</span>
               </div>
               <button
                 type="button"
@@ -400,6 +304,7 @@ export function DeliverManualModal({ open, onClose }) {
 
 export function DeliverBatchModal({ open, onClose }) {
   useModalA11y(open, onClose);
+  const locations = useDistinctLocations(open);
   if (!open) return null;
 
   return (
@@ -419,7 +324,7 @@ export function DeliverBatchModal({ open, onClose }) {
             <h2 id="deliver-batch-title" className="text-3xl font-extrabold tracking-tighter text-on-surface font-headline">
               Upload Delivery File
             </h2>
-            <p className="text-on-surface-variant text-sm mt-1">Batch process new inventory arrivals with precision.</p>
+            <p className="text-on-surface-variant text-sm mt-1">Batch deliver — preview mula sa CSV pag na-parse na.</p>
           </div>
           <button
             type="button"
@@ -450,15 +355,15 @@ export function DeliverBatchModal({ open, onClose }) {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant px-1">Location / Delivery Address</label>
-                <div className="relative">
-                  <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline text-lg">location_on</span>
-                  <input
-                    className="w-full bg-surface-container-highest border-none rounded-xl pl-12 pr-4 py-3 text-on-surface focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-outline"
-                    placeholder="Central Warehouse B-12"
-                    type="text"
-                  />
-                </div>
+                <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant px-1">Ship-from location</label>
+                <select className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 text-on-surface focus:ring-2 focus:ring-primary/20 transition-all appearance-none">
+                  <option value="">Select…</option>
+                  {locations.map((loc) => (
+                    <option key={`db-${loc}`} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -478,10 +383,9 @@ export function DeliverBatchModal({ open, onClose }) {
           </div>
           <div className="lg:w-3/5 bg-surface-bright flex flex-col overflow-hidden min-h-0">
             <div className="p-6 border-b border-outline-variant/10 bg-white/50 backdrop-blur-sm sticky top-0 z-10 flex justify-between items-center flex-wrap gap-2">
-              <span className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Delivery Preview</span>
+              <span className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Deliver preview</span>
               <div className="flex gap-2">
-                <span className="px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded-full">12 VALID</span>
-                <span className="px-3 py-1 bg-tertiary/10 text-tertiary text-[10px] font-bold rounded-full">2 ERRORS</span>
+                <span className="px-3 py-1 bg-surface-container-high text-on-surface-variant text-[10px] font-bold rounded-full">0 rows</span>
               </div>
             </div>
             <div className="overflow-auto flex-grow px-2 min-h-0">
@@ -495,59 +399,9 @@ export function DeliverBatchModal({ open, onClose }) {
                   </tr>
                 </thead>
                 <tbody className="text-sm font-medium">
-                  <tr className="bg-surface-container-lowest hover:bg-surface-container-low transition-colors group">
-                    <td className="px-6 py-4 rounded-l-xl text-primary font-bold">#SKU-9902</td>
-                    <td className="px-4 py-4">Ethereal Glass Panel 2x4</td>
-                    <td className="px-4 py-4">48</td>
-                    <td className="px-6 py-4 rounded-r-xl text-right">
-                      <div className="inline-flex items-center gap-1 text-green-600">
-                        <span className="material-symbols-outlined text-sm">check_circle</span>
-                        <span className="text-xs font-bold">Valid</span>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr className="bg-surface-container-lowest hover:bg-surface-container-low transition-colors group">
-                    <td className="px-6 py-4 rounded-l-xl text-primary font-bold">#SKU-4412</td>
-                    <td className="px-4 py-4">Titanium Strut - Grade A</td>
-                    <td className="px-4 py-4">120</td>
-                    <td className="px-6 py-4 rounded-r-xl text-right">
-                      <div className="inline-flex items-center gap-1 text-green-600">
-                        <span className="material-symbols-outlined text-sm">check_circle</span>
-                        <span className="text-xs font-bold">Valid</span>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr className="bg-surface-container-lowest border-2 border-tertiary/20 group">
-                    <td className="px-6 py-4 rounded-l-xl text-tertiary font-bold">#SKU-ERR0</td>
-                    <td className="px-4 py-4">Unknown Composite Material</td>
-                    <td className="px-4 py-4">12</td>
-                    <td className="px-6 py-4 rounded-r-xl text-right">
-                      <div className="inline-flex items-center gap-1 text-tertiary">
-                        <span className="material-symbols-outlined text-sm">error</span>
-                        <span className="text-xs font-bold">No Match</span>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr className="bg-surface-container-lowest hover:bg-surface-container-low transition-colors group">
-                    <td className="px-6 py-4 rounded-l-xl text-primary font-bold">#SKU-5521</td>
-                    <td className="px-4 py-4">Fluorescent Mesh Grid</td>
-                    <td className="px-4 py-4">5</td>
-                    <td className="px-6 py-4 rounded-r-xl text-right">
-                      <div className="inline-flex items-center gap-1 text-green-600">
-                        <span className="material-symbols-outlined text-sm">check_circle</span>
-                        <span className="text-xs font-bold">Valid</span>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr className="bg-surface-container-lowest hover:bg-surface-container-low transition-colors group">
-                    <td className="px-6 py-4 rounded-l-xl text-primary font-bold">#SKU-3122</td>
-                    <td className="px-4 py-4">Silicone Seals 50mm</td>
-                    <td className="px-4 py-4">200</td>
-                    <td className="px-6 py-4 rounded-r-xl text-right">
-                      <div className="inline-flex items-center gap-1 text-green-600">
-                        <span className="material-symbols-outlined text-sm">check_circle</span>
-                        <span className="text-xs font-bold">Valid</span>
-                      </div>
+                  <tr>
+                    <td colSpan={4} className="px-6 py-10 text-center text-on-surface-variant text-sm">
+                      Walang hardcoded rows. I-upload ang CSV at i-validate laban sa <code className="text-xs">inventory_items</code>.
                     </td>
                   </tr>
                 </tbody>

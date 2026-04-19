@@ -1,53 +1,41 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { supabase } from "../../lib/supabase";
+import { getErrorMessage } from "../../lib/errors";
+import { useAuth } from "../../contexts/AuthContext";
+import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
 
-const PROFILE_AVATAR =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuC3rGj7qr2aPKn-aDazX5JyZOWtjZSfFs7ynUSWFgOdXoZl8JSZtJnU8AmzO93YbmLDD3UagiwIkO-cYwGM-I96muKw1o6vgBx38gNLO-471HIM0W991dVDYARTJdZuy0wudiWdGoULieayLZjYzDoyB9OcUpRhkWnhCqMCJ577usPnDSsSVv_WKMpFtzeyiGUH9xBDZ3ZduLdbHL3FC7iNROxpi3w07e0Tw1YmMpNsguKvNINdfRZtlbKGZW660Fr7VVdrKABEM5s";
+function headerUserLabel(p) {
+  if (!p) return "";
+  const fn = (p.first_name || "").trim();
+  const ln = (p.last_name || "").trim();
+  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
+  return p.email || "";
+}
 
-const purchaseOrders = [
-  {
-    id: "PO-2024-001",
-    supplier: "Global Supplies Inc.",
-    status: "pending",
-    statusColor: "text-tertiary bg-tertiary-fixed",
-    items: 15,
-    total: "$12,450.00",
-    orderDate: "2024-01-15",
-    expectedDate: "2024-01-22",
-    priority: "high",
-    priorityBadge: "High Priority"
-  },
-  {
-    id: "PO-2024-002", 
-    supplier: "TechComponents Ltd.",
-    status: "approved",
-    statusColor: "text-primary bg-primary-fixed",
-    items: 8,
-    total: "$8,320.00",
-    orderDate: "2024-01-14",
-    expectedDate: "2024-01-25",
-    priority: "medium"
-  },
-  {
-    id: "PO-2024-003",
-    supplier: "Industrial Materials Co.",
-    status: "received",
-    statusColor: "text-secondary bg-secondary-fixed",
-    items: 22,
-    total: "$24,680.00", 
-    orderDate: "2024-01-10",
-    expectedDate: "2024-01-18",
-    priority: "low"
-  }
-];
+/** @param {string | null | undefined} status */
+function statusBadgeClass(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "draft" || s === "sent") return "text-tertiary bg-tertiary-fixed";
+  if (s === "confirmed") return "text-primary bg-primary-fixed";
+  if (s === "received") return "text-secondary bg-secondary-fixed";
+  if (s === "cancelled") return "text-error bg-error-container";
+  return "text-on-surface-variant bg-surface-container-high";
+}
 
-const suppliers = [
-  { id: 1, name: "Global Supplies Inc.", email: "orders@globalsupplies.com", phone: "+1-555-0123" },
-  { id: 2, name: "TechComponents Ltd.", email: "sales@techcomponents.com", phone: "+1-555-0124" },
-  { id: 3, name: "Industrial Materials Co.", email: "procurement@industrialmat.com", phone: "+1-555-0125" }
-];
+function formatMoney(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "—";
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(v);
+}
 
-function CreatePOModal({ open, onClose }) {
+function formatDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+}
+
+function CreatePOModal({ open, onClose, supplierOptions }) {
   const [formData, setFormData] = useState({
     supplier: "",
     items: [],
@@ -114,14 +102,16 @@ function CreatePOModal({ open, onClose }) {
               <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2">Supplier</label>
               <select
                 value={formData.supplier}
-                onChange={(e) => setFormData(prev => ({ ...prev, supplier: e.target.value }))}
+                onChange={(e) => setFormData((prev) => ({ ...prev, supplier: e.target.value }))}
                 className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all"
                 required
               >
                 <option value="">Select Supplier</option>
-                <option value="Global Supplies Inc.">Global Supplies Inc.</option>
-                <option value="TechComponents Ltd.">TechComponents Ltd.</option>
-                <option value="Industrial Materials Co.">Industrial Materials Co.</option>
+                {(supplierOptions ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -268,9 +258,119 @@ function CreatePOModal({ open, onClose }) {
 }
 
 export default function PurchaseOrders() {
+  const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState("orders");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [_selectedPO, setSelectedPO] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [poRows, setPoRows] = useState([]);
+  const [supplierRows, setSupplierRows] = useState([]);
+  const [stats, setStats] = useState({
+    total: 0,
+    thisMonth: 0,
+    pending: 0,
+    inTransit: 0,
+    totalValue: 0,
+  });
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    const startMonth = new Date();
+    startMonth.setDate(1);
+    startMonth.setHours(0, 0, 0, 0);
+    const startMonthIso = startMonth.toISOString();
+
+    try {
+      const [
+        poRes,
+        totalHead,
+        pendingHead,
+        transitHead,
+        amountsRes,
+        monthRes,
+        supRes,
+        poMetaRes,
+      ] = await Promise.all([
+        supabase
+          .from("purchase_orders")
+          .select(
+            `
+            id,
+            po_number,
+            status,
+            priority,
+            total_amount,
+            created_at,
+            expected_delivery_date,
+            suppliers ( name ),
+            purchase_order_items ( count )
+          `
+          )
+          .order("created_at", { ascending: false })
+          .limit(200),
+        supabase.from("purchase_orders").select("*", { count: "exact", head: true }),
+        supabase
+          .from("purchase_orders")
+          .select("*", { count: "exact", head: true })
+          .in("status", ["draft", "sent"]),
+        supabase.from("purchase_orders").select("*", { count: "exact", head: true }).eq("status", "confirmed"),
+        supabase.from("purchase_orders").select("total_amount"),
+        supabase.from("purchase_orders").select("id", { count: "exact", head: true }).gte("created_at", startMonthIso),
+        supabase.from("suppliers").select("id, name, email, phone").order("name"),
+        supabase.from("purchase_orders").select("supplier_id, created_at"),
+      ]);
+
+      if (poRes.error) throw poRes.error;
+      if (supRes.error) throw supRes.error;
+
+      setPoRows(poRes.data ?? []);
+
+      const totalValue =
+        amountsRes.data?.reduce((sum, row) => sum + Number(row.total_amount ?? 0), 0) ?? 0;
+
+      setStats({
+        total: totalHead.count ?? 0,
+        thisMonth: monthRes.count ?? 0,
+        pending: pendingHead.error ? 0 : pendingHead.count ?? 0,
+        inTransit: transitHead.error ? 0 : transitHead.count ?? 0,
+        totalValue,
+      });
+
+      const suppliersList = supRes.data ?? [];
+      const meta = poMetaRes.data ?? [];
+      const poCountBySupplier = new Map();
+      const lastOrderBySupplier = new Map();
+      for (const row of meta) {
+        const sid = row.supplier_id;
+        if (!sid) continue;
+        poCountBySupplier.set(sid, (poCountBySupplier.get(sid) ?? 0) + 1);
+        const cur = lastOrderBySupplier.get(sid);
+        const t = row.created_at ? new Date(row.created_at).getTime() : 0;
+        if (!cur || t > cur) lastOrderBySupplier.set(sid, t);
+      }
+      setSupplierRows(
+        suppliersList.map((s) => ({
+          ...s,
+          poCount: poCountBySupplier.get(s.id) ?? 0,
+          lastOrder: lastOrderBySupplier.get(s.id)
+            ? new Date(lastOrderBySupplier.get(s.id)).toISOString().slice(0, 10)
+            : "—",
+        }))
+      );
+    } catch (e) {
+      setLoadError(getErrorMessage(e));
+      setPoRows([]);
+      setSupplierRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   return (
     <div className="bg-surface text-on-surface antialiased min-h-screen pb-20 md:pb-0">
@@ -323,11 +423,11 @@ export default function PurchaseOrders() {
                 <span className="material-symbols-outlined">settings</span>
               </button>
             </div>
-            <img
-              alt="User profile"
-              className="w-8 h-8 rounded-full border border-outline-variant shrink-0"
-              data-alt="professional portrait of a purchasing manager"
-              src={PROFILE_AVATAR}
+            <UserAvatarOrIcon
+              src={profile?.avatar_url}
+              alt={headerUserLabel(profile)}
+              size="md"
+              className="border border-outline-variant"
             />
           </div>
         </div>
@@ -386,30 +486,38 @@ export default function PurchaseOrders() {
           </button>
         </div>
 
+        {loadError ? (
+          <div className="mb-6 rounded-xl border border-error/30 bg-error-container/30 px-4 py-3 text-sm text-on-surface">
+            {loadError}
+          </div>
+        ) : null}
+
         {activeTab === "orders" && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
               <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
                 <span className="text-xs font-semibold text-primary uppercase tracking-widest mb-2 block">Total POs</span>
-                <div className="font-headline text-3xl font-extrabold text-on-surface">147</div>
-                <div className="mt-2 text-xs text-on-surface-variant font-medium">This month: 23</div>
+                <div className="font-headline text-3xl font-extrabold text-on-surface">
+                  {loading ? "—" : stats.total}
+                </div>
+                <div className="mt-2 text-xs text-on-surface-variant font-medium">This month: {loading ? "—" : stats.thisMonth}</div>
               </div>
               <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
                 <span className="text-xs font-semibold text-tertiary uppercase tracking-widest mb-2 block">Pending</span>
-                <div className="font-headline text-3xl font-extrabold text-tertiary">12</div>
-                <div className="mt-2 text-xs text-tertiary font-medium">Awaiting approval</div>
+                <div className="font-headline text-3xl font-extrabold text-tertiary">{loading ? "—" : stats.pending}</div>
+                <div className="mt-2 text-xs text-tertiary font-medium">Draft or sent</div>
               </div>
               <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
                 <span className="text-xs font-semibold text-secondary uppercase tracking-widest mb-2 block">In Transit</span>
-                <div className="font-headline text-3xl font-extrabold text-secondary">8</div>
-                <div className="mt-2 text-xs text-on-surface-variant font-medium">On the way</div>
+                <div className="font-headline text-3xl font-extrabold text-secondary">{loading ? "—" : stats.inTransit}</div>
+                <div className="mt-2 text-xs text-on-surface-variant font-medium">Status: confirmed</div>
               </div>
               <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
                 <span className="text-xs font-semibold text-primary uppercase tracking-widest mb-2 block">Total Value</span>
-                <div className="font-headline text-3xl font-extrabold text-on-surface">$45.2K</div>
-                <div className="mt-2 flex items-center text-xs text-green-600 font-medium">
-                  <span className="material-symbols-outlined text-sm mr-1">trending_up</span> +12% vs last month
+                <div className="font-headline text-3xl font-extrabold text-on-surface">
+                  {loading ? "—" : formatMoney(stats.totalValue)}
                 </div>
+                <div className="mt-2 text-xs text-on-surface-variant font-medium">Sum of all PO totals</div>
               </div>
             </div>
 
@@ -429,58 +537,81 @@ export default function PurchaseOrders() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-outline-variant/5 dark:divide-slate-700/50">
-                    {purchaseOrders.map((po) => (
-                      <tr key={po.id} className="hover:bg-surface-container/30 transition-colors group">
-                        <td className="px-6 py-4">
-                          <div className="font-semibold text-on-surface">{po.id}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="font-medium text-on-surface">{po.supplier}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <span className={`px-3 py-1 text-xs font-bold rounded-full uppercase ${po.statusColor}`}>
-                              {po.status}
-                            </span>
-                            {po.priorityBadge && (
-                              <span className="px-2 py-0.5 bg-error-container text-on-error-container text-[10px] font-bold rounded-full">
-                                {po.priorityBadge}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-on-surface-variant">{po.items}</td>
-                        <td className="px-6 py-4 font-semibold text-on-surface">{po.total}</td>
-                        <td className="px-6 py-4 text-sm text-on-surface-variant">{po.orderDate}</td>
-                        <td className="px-6 py-4 text-sm text-on-surface-variant">{po.expectedDate}</td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              type="button"
-                              className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
-                              aria-label="View PO"
-                              onClick={() => setSelectedPO(po)}
-                            >
-                              <span className="material-symbols-outlined">visibility</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
-                              aria-label="Edit PO"
-                            >
-                              <span className="material-symbols-outlined">edit</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container rounded-lg transition-all"
-                              aria-label="Delete PO"
-                            >
-                              <span className="material-symbols-outlined">delete</span>
-                            </button>
-                          </div>
+                    {loading ? (
+                      <tr>
+                        <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant text-sm">
+                          Loading purchase orders…
                         </td>
                       </tr>
-                    ))}
+                    ) : poRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant text-sm">
+                          Walang purchase order sa database. Magdagdag ng suppliers at PO sa Supabase o gamitin ang Create PO (line items ay susunod pa).
+                        </td>
+                      </tr>
+                    ) : (
+                      poRows.map((po) => {
+                        const itemCount =
+                          Array.isArray(po.purchase_order_items) && po.purchase_order_items[0]?.count != null
+                            ? po.purchase_order_items[0].count
+                            : 0;
+                        const supplierName = po.suppliers?.name ?? "—";
+                        const st = (po.status || "").toLowerCase();
+                        const priorityHigh = (po.priority || "").toLowerCase() === "high";
+                        return (
+                          <tr key={po.id} className="hover:bg-surface-container/30 transition-colors group">
+                            <td className="px-6 py-4">
+                              <div className="font-semibold text-on-surface">{po.po_number ?? po.id}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="font-medium text-on-surface">{supplierName}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`px-3 py-1 text-xs font-bold rounded-full uppercase ${statusBadgeClass(st)}`}>
+                                  {st || "—"}
+                                </span>
+                                {priorityHigh ? (
+                                  <span className="px-2 py-0.5 bg-error-container text-on-error-container text-[10px] font-bold rounded-full">
+                                    High Priority
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-on-surface-variant">{itemCount}</td>
+                            <td className="px-6 py-4 font-semibold text-on-surface">{formatMoney(po.total_amount)}</td>
+                            <td className="px-6 py-4 text-sm text-on-surface-variant">{formatDate(po.created_at)}</td>
+                            <td className="px-6 py-4 text-sm text-on-surface-variant">{formatDate(po.expected_delivery_date)}</td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  type="button"
+                                  className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
+                                  aria-label="View PO"
+                                  onClick={() => setSelectedPO(po)}
+                                >
+                                  <span className="material-symbols-outlined">visibility</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
+                                  aria-label="Edit PO"
+                                >
+                                  <span className="material-symbols-outlined">edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container rounded-lg transition-all"
+                                  aria-label="Delete PO"
+                                >
+                                  <span className="material-symbols-outlined">delete</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -503,15 +634,28 @@ export default function PurchaseOrders() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/5 dark:divide-slate-700/50">
-                  {suppliers.map((supplier) => (
+                  {loading ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center text-on-surface-variant text-sm">
+                        Loading suppliers…
+                      </td>
+                    </tr>
+                  ) : supplierRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center text-on-surface-variant text-sm">
+                        Walang supplier record. Magdagdag sa table na <code className="text-xs">suppliers</code> sa Supabase.
+                      </td>
+                    </tr>
+                  ) : (
+                    supplierRows.map((supplier) => (
                     <tr key={supplier.id} className="hover:bg-surface-container/30 transition-colors group">
                       <td className="px-6 py-4">
                         <div className="font-semibold text-on-surface">{supplier.name}</div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.email}</td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.phone}</td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">12</td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">2024-01-15</td>
+                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.email ?? "—"}</td>
+                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.phone ?? "—"}</td>
+                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.poCount}</td>
+                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.lastOrder}</td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
@@ -538,7 +682,8 @@ export default function PurchaseOrders() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -546,7 +691,11 @@ export default function PurchaseOrders() {
         )}
       </main>
 
-      <CreatePOModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
+      <CreatePOModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        supplierOptions={supplierRows.map((s) => ({ id: s.id, name: s.name }))}
+      />
     </div>
   );
 }

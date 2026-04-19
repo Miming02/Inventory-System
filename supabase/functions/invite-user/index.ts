@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
 
     const { data: prof, error: profErr } = await admin
       .from("profiles")
-      .select("roles(name)")
+      .select("organization_id, roles(name)")
       .eq("id", userData.user.id)
       .maybeSingle();
 
@@ -84,11 +84,22 @@ Deno.serve(async (req) => {
     const firstName = parts[0] ?? "";
     const lastName = parts.slice(1).join(" ") || "";
 
+    const inviterOrgId = (prof as { organization_id?: string | null }).organization_id;
+    if (!inviterOrgId) {
+      return new Response(JSON.stringify({ error: "Inviter profile has no organization_id" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const siteUrl = (Deno.env.get("SITE_URL") ?? "http://localhost:5173").replace(/\/$/, "");
 
     const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
       redirectTo: `${siteUrl}/login`,
-      data: { full_name: fullName },
+      data: {
+        full_name: fullName,
+        organization_id: inviterOrgId,
+      },
     });
 
     if (inviteErr) {
@@ -113,6 +124,7 @@ Deno.serve(async (req) => {
         first_name: firstName,
         last_name: lastName,
         role_id: roleId,
+        organization_id: inviterOrgId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", newId);

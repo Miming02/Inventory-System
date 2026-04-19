@@ -34,12 +34,12 @@ export function normalizeRole(role) {
 /**
  * Role-based access aligned with product roles:
  * - Admin: full system access, users, configuration, approvals
- * - Warehouse Staff: receiving, movement, dispatch, counts, adjustments
+ * - Warehouse Staff: receiving, movement, deliver, counts, adjustments
  * - Production Staff: request/consume items, material usage (maps to DB name "Production Staff")
  * - Procurement Staff: suppliers, POs, incoming deliveries
  * - Management: reports/analytics, monitor stock and operations (read-focused)
  *
- * DB `roles.name` must match these strings (see supabase-setup.sql seeds).
+ * DB `roles.name` must match these strings (see `backend/supabase/migrations/001_inventory_setup.sql` seeds).
  */
 
 /** @type {Record<string, string[]>} path -> roles allowed (Admin always allowed in canAccessPath) */
@@ -103,7 +103,7 @@ export function roleDashboardSubtitle(role) {
   const r = normalizeRole(role);
   const map = {
     Admin: "Full access — users, configuration, approvals",
-    "Warehouse Staff": "Receiving, movement, dispatch, counts & adjustments",
+    "Warehouse Staff": "Receiving, movement, deliver, counts & adjustments",
     "Production Staff": "Request & consume items, material usage",
     "Procurement Staff": "Suppliers, purchase orders, incoming deliveries",
     Management: "Reports & analytics, monitor stock and operations",

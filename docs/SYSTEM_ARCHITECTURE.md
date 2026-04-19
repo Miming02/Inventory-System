@@ -64,7 +64,7 @@ This document replaces informal or aspirational descriptions elsewhere: the **im
 | Area | Location | Notes |
 |------|----------|--------|
 | Schema + RLS + triggers | `backend/supabase/migrations/001_inventory_setup.sql` | Source of truth for DDL; copy also in `supabase-setup.sql` |
-| Edge Function | `supabase/functions/invite-user/index.ts` (and duplicate under `backend/supabase/functions/` if present) | Admin invite; verifies JWT; uses service role server-side |
+| Edge Function | `supabase/functions/invite-user/index.ts` | Admin invite; verifies JWT; uses service role server-side |
 | Logical ERD narrative | `database-schema.md` | Documents domains; note `profiles` + `auth.users` supersede older `users` narrative where they differ |
 
 **Key PostgreSQL artifacts**

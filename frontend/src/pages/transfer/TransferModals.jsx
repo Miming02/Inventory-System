@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useDistinctLocations } from "../../lib/useDistinctLocations";
 
 function useModalA11y(open, onClose) {
   useEffect(() => {
@@ -16,35 +17,9 @@ function useModalA11y(open, onClose) {
   }, [open, onClose]);
 }
 
-const MARCUS_TRANSFER_AVATAR =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuBKxM1UYgs2a2Aa0LESbO5a1pRe_o7T4MvaHT6XgoXiKBpdLDepWT9a1Ldy4AmgItZeb85XZqNWjFdqvhxH3QwL5hE5ypryN2Q3_Lpfa_orqYafXpMshGTSTqN7hBD5309ct-oXYkpE8oNdjvFYk6hFDS8zh6jtHVEiQfvDNGqCEY58gbUgxMldwxnmswNOVbMJ_KrBUOjpz2MvWzzHsoDiZTbAAeacImTyrzz6Kf7-XDA5KXzsPCcvSru5Rg08-an2LRuyAQ606Z8";
-
-const SCAN_LIST_ITEMS = [
-  {
-    name: "Vanguard Series X1",
-    sku: "VN-X1-2024",
-    qty: "12",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCSnWft6-aYMTIpYfcq1PUd9oEl_YPmoz-y2QGS_zmT7ih5aavhRHJniv81ahkajoSWkFhe8OG2ATdp6WvJ0J6Yhay9yuxdtPPGeEXMvD7ODo2WN0iuymJJ8iSOhWUzycHbqY1B1OEUpFJMko0yPxM39jPFOIT1bkI8KkLoKGGrvJ7DdA8ScWMR4dKQHOT6UcK5GJewASCwXXs9uSHmR7wpPtAedunMwASHcGDngfq0ZaxiZBaM4EDyyiJ2DNWy43JVzM0XVc3-rF4",
-    dataAlt: "Premium minimalist white watch on a grey marble background with soft lighting"
-  },
-  {
-    name: "Audio Pro Elite",
-    sku: "AU-PE-99",
-    qty: "05",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuB4jmAYW9ZHP-O1EGPVmR8QTgtY8eoR3YXTBDSZ0sz6OHY4D_10mycCdNwtUdvKkyiReR3oIidK3_UQe_xctaF-a1jgNg8K64x9h02ZA_XSP2N-m2_aJ8jG1cMwx3AbFeZ0uxwI8j7BgsO769KbcxtYWKvqC7Eir9V8ARXGRqpyYC6UcDAvJF3LJjLxZr0QrGL9g6USnz_amgUm8fRKhMJlKOlHLAZv-_9KZkaN_OFb7Ofs0rIwVbeb_QojyVKrVSk_MhHleFSnzWc",
-    dataAlt: "High-end professional wireless headphones with leather details on a solid background"
-  },
-  {
-    name: "Lumix Prime Lens",
-    sku: "LX-PR-35M",
-    qty: "02",
-    img: "https://lh3.googleusercontent.com/aida-public/AB6AXuAdikw7odVmtuqMTpKOLVqr3ArBN3BtD7-BTzr6MZaQUNQMySdUQsOSGuaLViLhMUEof4QyxZjniRjnCmk6rt4_UZAK83R2Ozl4wbt2A92iNlAARGXgKsdNvoCjMzzFiVLI6-DaWG1IcbtKvWaZ7VMK2a7conyGULLrLHYPIIjE1m2SaqeCraNL8l-3pffL3QOUNZElBGWiXIjB9bzcjgpBEGDy5IJOtcZ-WZ2JT7k7lx776eqcjCW57ud3ufJ0-UBX2kSBV8WVUWQ",
-    dataAlt: "High-quality professional camera lens with detailed glass reflections and mechanical elements"
-  }
-];
-
 export function TransferScanModal({ open, onClose }) {
   useModalA11y(open, onClose);
+  const locations = useDistinctLocations(open);
   if (!open) return null;
 
   return (
@@ -103,37 +78,35 @@ export function TransferScanModal({ open, onClose }) {
                   <div className="space-y-2">
                     <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant ml-1">From Location</label>
                     <select className="w-full bg-surface-container-highest border-none rounded-2xl py-4 px-4 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all font-medium text-on-surface appearance-none">
-                      <option>Warehouse A</option>
-                      <option>Showroom Alpha</option>
-                      <option>Main Depot</option>
+                      <option value="">Select location…</option>
+                      {locations.map((loc) => (
+                        <option key={`from-${loc}`} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
                     </select>
+                    {locations.length === 0 ? (
+                      <p className="text-[10px] text-on-surface-variant">Walang `location` sa inventory — maglagay muna sa items.</p>
+                    ) : null}
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant ml-1">To Location</label>
                     <select className="w-full bg-surface-container-highest border-none rounded-2xl py-4 px-4 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all font-medium text-on-surface appearance-none">
-                      <option>Retail Store 04</option>
-                      <option>Showroom Beta</option>
-                      <option>Secondary Hub</option>
+                      <option value="">Select location…</option>
+                      {locations.map((loc) => (
+                        <option key={`to-${loc}`} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant ml-1">Transfer By</label>
-                  <div className="flex items-center gap-3 p-3 bg-surface-container-highest rounded-2xl">
-                    <div className="w-10 h-10 rounded-full overflow-hidden bg-primary-fixed shrink-0">
-                      <img
-                        className="w-full h-full object-cover"
-                        data-alt="Close up of a logistics manager portrait with a friendly expression in a bright studio setting"
-                        src={MARCUS_TRANSFER_AVATAR}
-                        alt="Marcus Chen"
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-on-surface">Marcus Chen</p>
-                      <p className="text-xs text-on-surface-variant">Operations Lead</p>
-                    </div>
-                    <span className="material-symbols-outlined text-outline shrink-0">unfold_more</span>
-                  </div>
+                  <p className="text-xs text-on-surface-variant px-1 leading-relaxed">
+                    Kapag naka-wire na ang submit, gagamitin ang iyong session (<code className="text-[10px]">created_by</code> sa{" "}
+                    <code className="text-[10px]">stock_transfers</code>).
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant ml-1">Attachment</label>
@@ -153,42 +126,21 @@ export function TransferScanModal({ open, onClose }) {
             </div>
             <div className="lg:col-span-7 p-8">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-bold text-on-surface font-headline">Scanned Items (3)</h2>
+                <h2 className="text-lg font-bold text-on-surface font-headline">Scanned Items (0)</h2>
                 <button type="button" className="text-xs font-bold text-primary uppercase tracking-wider">
                   Clear All
                 </button>
               </div>
               <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
-                {SCAN_LIST_ITEMS.map((item) => (
-                  <div
-                    key={item.sku}
-                    className="flex items-center gap-4 p-4 rounded-2xl bg-surface-container-low group hover:bg-surface-container-high transition-all"
-                  >
-                    <div className="w-16 h-16 rounded-xl bg-surface-container-highest flex items-center justify-center overflow-hidden shrink-0">
-                      <img alt={item.name} data-alt={item.dataAlt} className="w-full h-full object-cover" src={item.img} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between gap-2">
-                        <h3 className="font-bold text-on-surface truncate">{item.name}</h3>
-                        <span className="text-xs font-bold text-on-surface shrink-0">Qty: {item.qty}</span>
-                      </div>
-                      <p className="text-xs text-on-surface-variant font-medium mt-1">SKU: {item.sku}</p>
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-bold">WAREHOUSE A</span>
-                        <span className="material-symbols-outlined text-[10px] text-outline">arrow_forward</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant font-bold">RETAIL 04</span>
-                      </div>
-                    </div>
-                    <button type="button" className="p-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <span className="material-symbols-outlined text-error">delete</span>
-                    </button>
-                  </div>
-                ))}
+                <p className="text-sm text-on-surface-variant leading-relaxed p-2">
+                  Walang mock list. Pag naka-submit na ang flow, lalabas dito ang lines mula sa iyong session bago i-save sa{" "}
+                  <code className="text-xs">stock_transfers</code> / <code className="text-xs">stock_transfer_items</code>.
+                </p>
               </div>
               <div className="mt-8 pt-8 border-t border-outline-variant/30 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Total Items</span>
-                  <span className="text-xl font-extrabold text-on-surface font-headline">19 Units</span>
+                  <span className="text-xl font-extrabold text-on-surface font-headline">0 Units</span>
                 </div>
                 <button
                   type="button"
@@ -212,14 +164,9 @@ export function TransferScanModal({ open, onClose }) {
   );
 }
 
-const MANUAL_QUEUE = [
-  { sku: "LTX-440", name: "Velvet Accent Chair", qty: "12", barWidth: "w-3/4" },
-  { sku: "OAK-001", name: "Minimalist Oak Table", qty: "04", barWidth: "w-1/4" },
-  { sku: "SIL-299", name: "Silk Drapery Set", qty: "28", barWidth: "w-full" }
-];
-
 export function TransferManualModal({ open, onClose }) {
   useModalA11y(open, onClose);
+  const locations = useDistinctLocations(open);
   if (!open) return null;
 
   return (
@@ -277,26 +224,28 @@ export function TransferManualModal({ open, onClose }) {
             <div className="flex flex-col gap-2">
               <label className="text-xs font-semibold text-on-surface-variant ml-4">FROM LOCATION</label>
               <select className="w-full bg-surface-container-highest border-none rounded-full py-3.5 px-6 text-sm focus:ring-2 focus:ring-primary/10 transition-all appearance-none cursor-pointer">
-                <option>Central Warehouse A</option>
-                <option>North Logistics Hub</option>
-                <option>West Side Gallery</option>
+                <option value="">Select location…</option>
+                {locations.map((loc) => (
+                  <option key={`mf-${loc}`} value={loc}>
+                    {loc}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="flex flex-col gap-2">
               <label className="text-xs font-semibold text-on-surface-variant ml-4">TO LOCATION</label>
               <select className="w-full bg-surface-container-highest border-none rounded-full py-3.5 px-6 text-sm focus:ring-2 focus:ring-primary/10 transition-all appearance-none cursor-pointer">
-                <option>South Distribution Center</option>
-                <option>East Retail Plaza</option>
-                <option>Secondary Storage B</option>
+                <option value="">Select location…</option>
+                {locations.map((loc) => (
+                  <option key={`mt-${loc}`} value={loc}>
+                    {loc}
+                  </option>
+                ))}
               </select>
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 md:col-span-2">
               <label className="text-xs font-semibold text-on-surface-variant ml-4">TRANSFER BY</label>
-              <select className="w-full bg-surface-container-highest border-none rounded-full py-3.5 px-6 text-sm focus:ring-2 focus:ring-primary/10 transition-all appearance-none cursor-pointer">
-                <option>Marcus Sterling (Logistics Lead)</option>
-                <option>Elena Vance (Inventory Mgr)</option>
-                <option>Julian Thorne (Director)</option>
-              </select>
+              <p className="text-xs text-on-surface-variant ml-4">Gagamitin ang naka-login na user kapag naka-save na sa database.</p>
             </div>
             <div className="flex flex-col gap-2">
               <label className="text-xs font-semibold text-on-surface-variant ml-4">ATTACHMENT (OPTIONAL)</label>
@@ -319,33 +268,17 @@ export function TransferManualModal({ open, onClose }) {
         <div className="w-full md:w-96 bg-surface-container-low p-8 lg:p-10 flex flex-col shrink-0 min-h-0">
           <div className="flex items-center justify-between mb-8">
             <h3 className="font-headline font-bold text-lg text-on-surface">Queue Preview</h3>
-            <span className="bg-primary-fixed text-on-primary-fixed px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase">3 Items</span>
+            <span className="bg-primary-fixed text-on-primary-fixed px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase">0 Items</span>
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto mb-8 min-h-0">
-            {MANUAL_QUEUE.map((row) => (
-              <div key={row.sku} className="bg-surface-container-lowest p-4 rounded-xl shadow-sm group">
-                <div className="flex justify-between items-start mb-2">
-                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-tighter">SKU: {row.sku}</span>
-                  <button type="button" className="text-error opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="material-symbols-outlined text-sm">delete</span>
-                  </button>
-                </div>
-                <p className="font-bold text-sm text-on-surface mb-1">{row.name}</p>
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-xs text-on-surface-variant">
-                    Qty: <span className="text-primary font-bold">{row.qty}</span>
-                  </span>
-                  <div className="h-1 w-20 bg-primary-fixed rounded-full overflow-hidden">
-                    <div className={`bg-primary h-full ${row.barWidth}`} />
-                  </div>
-                </div>
-              </div>
-            ))}
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Walang mock queue. Magdadagdag ng rows dito pag may local state / API na para sa transfer lines.
+            </p>
           </div>
           <div className="space-y-4 pt-6 border-t border-outline-variant/30 shrink-0">
             <div className="flex justify-between text-xs font-semibold text-on-surface-variant px-2">
               <span>EST. WEIGHT</span>
-              <span className="text-on-surface">142.5 kg</span>
+              <span className="text-on-surface">—</span>
             </div>
             <button
               type="button"
@@ -371,6 +304,7 @@ export function TransferManualModal({ open, onClose }) {
 
 export function TransferBatchModal({ open, onClose }) {
   useModalA11y(open, onClose);
+  const locations = useDistinctLocations(open);
   if (!open) return null;
 
   return (
@@ -415,9 +349,12 @@ export function TransferBatchModal({ open, onClose }) {
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">From Location</label>
                     <select className="w-full bg-surface-container-lowest border-none rounded-xl h-12 px-4 text-sm focus:ring-2 focus:ring-primary/20 transition-all">
-                      <option>Central Distribution Hub</option>
-                      <option>East Coast Warehouse</option>
-                      <option>Primary Fulfilment Center</option>
+                      <option value="">Select…</option>
+                      {locations.map((loc) => (
+                        <option key={`bf-${loc}`} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="flex justify-center -my-2 relative z-10">
@@ -428,9 +365,12 @@ export function TransferBatchModal({ open, onClose }) {
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">To Location</label>
                     <select className="w-full bg-surface-container-lowest border-none rounded-xl h-12 px-4 text-sm focus:ring-2 focus:ring-primary/20 transition-all">
-                      <option>Select destination...</option>
-                      <option>Downtown Retail Suite</option>
-                      <option>Satellite Storage B</option>
+                      <option value="">Select destination…</option>
+                      {locations.map((loc) => (
+                        <option key={`bt-${loc}`} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -441,11 +381,7 @@ export function TransferBatchModal({ open, onClose }) {
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Transfer By</label>
-                    <select className="w-full bg-surface-container-low border-none rounded-xl h-12 px-4 text-sm focus:ring-2 focus:ring-primary/20">
-                      <option>Select User</option>
-                      <option>Marcus Aurelius</option>
-                      <option>Elena Vance</option>
-                    </select>
+                    <p className="text-[10px] text-on-surface-variant px-1 pt-2">Current user (pag naka-submit na)</p>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -467,11 +403,8 @@ export function TransferBatchModal({ open, onClose }) {
                 <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
                   <h2 className="text-xl font-bold tracking-tight text-on-surface font-headline">Transfer Preview</h2>
                   <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 rounded-full bg-tertiary-fixed text-on-tertiary-fixed-variant text-[10px] font-bold uppercase tracking-tighter">
-                      8 Alerts Found
-                    </span>
-                    <span className="px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed-variant text-[10px] font-bold uppercase tracking-tighter">
-                      240 Items
+                    <span className="px-3 py-1 rounded-full bg-surface-container-high text-on-surface-variant text-[10px] font-bold uppercase tracking-tighter">
+                      0 rows
                     </span>
                   </div>
                 </div>
@@ -487,64 +420,9 @@ export function TransferBatchModal({ open, onClose }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-outline-variant/5">
-                      <tr className="hover:bg-white/50 transition-colors">
-                        <td className="p-4 text-xs font-mono text-on-surface">FC-9920-X1</td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-surface-container-high shrink-0" />
-                            <span className="text-sm font-medium">Crystal Decanter Set</span>
-                          </div>
-                        </td>
-                        <td className="p-4 text-sm">48</td>
-                        <td className="p-4 text-sm">Mint</td>
-                        <td className="p-4">
-                          <span className="inline-block w-2 h-2 rounded-full bg-primary mr-2" />
-                          <span className="text-xs text-on-surface-variant">Valid</span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-white/50 transition-colors">
-                        <td className="p-4 text-xs font-mono text-on-surface">FC-1102-M4</td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-surface-container-high shrink-0" />
-                            <span className="text-sm font-medium">Velvet Cushion - Navy</span>
-                          </div>
-                        </td>
-                        <td className="p-4 text-sm">120</td>
-                        <td className="p-4 text-sm">A-Grade</td>
-                        <td className="p-4">
-                          <span className="inline-block w-2 h-2 rounded-full bg-primary mr-2" />
-                          <span className="text-xs text-on-surface-variant">Valid</span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-white/50 transition-colors bg-tertiary-fixed/10">
-                        <td className="p-4 text-xs font-mono text-on-surface">FC-0043-L2</td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-surface-container-high shrink-0" />
-                            <span className="text-sm font-medium">Oak Sideboard Unit</span>
-                          </div>
-                        </td>
-                        <td className="p-4 text-sm font-bold text-tertiary">3</td>
-                        <td className="p-4 text-sm">B-Grade</td>
-                        <td className="p-4">
-                          <span className="inline-block w-2 h-2 rounded-full bg-tertiary mr-2" />
-                          <span className="text-xs text-tertiary font-bold">Low Stock</span>
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-white/50 transition-colors">
-                        <td className="p-4 text-xs font-mono text-on-surface">FC-7721-P9</td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-surface-container-high shrink-0" />
-                            <span className="text-sm font-medium">Artisanal Ceramic Vase</span>
-                          </div>
-                        </td>
-                        <td className="p-4 text-sm">14</td>
-                        <td className="p-4 text-sm">Mint</td>
-                        <td className="p-4">
-                          <span className="inline-block w-2 h-2 rounded-full bg-primary mr-2" />
-                          <span className="text-xs text-on-surface-variant">Valid</span>
+                      <tr>
+                        <td colSpan={5} className="p-8 text-sm text-on-surface-variant text-center">
+                          I-parse ang CSV at i-validate laban sa <code className="text-xs">inventory_items</code> para lumitaw ang rows dito — walang hardcoded preview.
                         </td>
                       </tr>
                     </tbody>
@@ -554,12 +432,12 @@ export function TransferBatchModal({ open, onClose }) {
                   <div className="flex items-center gap-4 flex-wrap">
                     <div className="flex flex-col">
                       <span className="text-[10px] uppercase font-bold text-on-surface-variant">Estimated Weight</span>
-                      <span className="text-lg font-bold text-on-surface font-headline">1,240 kg</span>
+                      <span className="text-lg font-bold text-on-surface font-headline">—</span>
                     </div>
                     <div className="w-px h-10 bg-outline-variant/20 mx-2 hidden sm:block" />
                     <div className="flex flex-col">
                       <span className="text-[10px] uppercase font-bold text-on-surface-variant">Total Value</span>
-                      <span className="text-lg font-bold text-on-surface font-headline">$18,450.00</span>
+                      <span className="text-lg font-bold text-on-surface font-headline">—</span>
                     </div>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-4">

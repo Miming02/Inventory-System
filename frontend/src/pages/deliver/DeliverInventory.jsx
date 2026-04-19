@@ -1,10 +1,51 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { DeliverScanModal, DeliverManualModal, DeliverBatchModal } from "./DeliverModals";
+import { supabase } from "../../lib/supabase";
+import { getErrorMessage } from "../../lib/errors";
+import { useAuth } from "../../contexts/AuthContext";
+import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
+
+function headerUserLabel(p) {
+  if (!p) return "";
+  const fn = (p.first_name || "").trim();
+  const ln = (p.last_name || "").trim();
+  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
+  return p.email || "";
+}
 
 export default function DeliverInventory() {
+  const { profile } = useAuth();
   const [activeModal, setActiveModal] = useState(null);
   const closeModal = useCallback(() => setActiveModal(null), []);
+  const [recentLoading, setRecentLoading] = useState(true);
+  const [recentError, setRecentError] = useState("");
+  const [recentOut, setRecentOut] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setRecentLoading(true);
+      setRecentError("");
+      try {
+        const { data, error } = await supabase
+          .from("stock_movements")
+          .select("id, quantity, created_at, to_location, reference_type, inventory_items ( name, sku )")
+          .eq("movement_type", "out")
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (error) throw error;
+        if (!cancelled) setRecentOut(data ?? []);
+      } catch (e) {
+        if (!cancelled) setRecentError(getErrorMessage(e));
+      } finally {
+        if (!cancelled) setRecentLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="bg-surface text-on-surface min-h-dvh flex flex-col lg:h-dvh lg:max-h-dvh lg:overflow-hidden pb-24 md:pb-0">
@@ -18,11 +59,18 @@ export default function DeliverInventory() {
               The Fluid Curator
             </Link>
             <nav className="hidden md:flex gap-6 items-center">
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Inventory</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Transfer</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Production</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Dispatch</a>
-              <a className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" href="#">Audit</a>
+              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/inventory">
+                Inventory
+              </Link>
+              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/transfer">
+                Transfer
+              </Link>
+              <Link className="font-manrope tracking-tight font-semibold text-blue-600 border-b-2 border-blue-600 pb-0.5" to="/deliver">
+                Deliver
+              </Link>
+              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/count">
+                Count
+              </Link>
             </nav>
           </div>
           <div className="flex items-center gap-4">
@@ -32,8 +80,8 @@ export default function DeliverInventory() {
             <button className="p-2 text-slate-500 hover:text-blue-600 transition-all active:opacity-80" type="button">
               <span className="material-symbols-outlined">settings</span>
             </button>
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-high border-2 border-primary-container">
-              <img className="w-full h-full object-cover" alt="Manager profile avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB0LCd9E4nE7ywQHcRnVBxfEj2BPODwcH7L-wupSdcIyd4UzjZGfDvK5vdcTy3NdOISI1VVdBiNpWDHJEIOaLYBJczG99HtJaQzMYr1LP5uHQ-YKbYo7B_I6eG8RZ1mneWyQ1clK7aWayb5mJ_0mjD08RCd8_ShqbLizlbVu7V44UBa56deKwoV7a0Jtoz17c-24hCzA3PbiyIhZfCPO-q3qeP9nWgBApsNaT8nSQryhcgMW7YhgjapT2THHivtZOkE9l-HxnmyKBQ" />
+            <div className="rounded-full border-2 border-primary-container bg-surface-container-high">
+              <UserAvatarOrIcon src={profile?.avatar_url} alt={headerUserLabel(profile)} size="md" />
             </div>
           </div>
         </div>
@@ -62,7 +110,7 @@ export default function DeliverInventory() {
               </div>
               <h2 className="text-base font-bold font-manrope text-white mb-1">Scan SKU or Code</h2>
               <p className="text-blue-100 text-[11px] sm:text-xs leading-snug line-clamp-2">
-                Scan items quickly and deliver them using barcode or QR code. Perfect for high-volume dispatching.
+                Scan items and record outbound deliveries (stock movements) using barcode or QR.
               </p>
             </div>
             <div className="flex items-center gap-1.5 text-white font-semibold text-xs">
@@ -112,22 +160,68 @@ export default function DeliverInventory() {
           </button>
         </div>
 
-        <div className="bg-surface-container-low rounded-xl p-3 sm:p-4 shrink-0">
-          <div className="relative overflow-hidden rounded-lg">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full -mr-16 -mt-16 pointer-events-none" />
-            <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
-              <div className="min-w-0">
-                <h3 className="text-base font-bold font-manrope text-on-surface leading-tight">Need a delivery summary?</h3>
-                <p className="text-on-surface-variant text-[11px] sm:text-xs mt-0.5 line-clamp-2">
-                  Access your recently completed deliveries and manifests in the reporting dashboard.
-                </p>
-              </div>
-              <button type="button" className="shrink-0 px-4 py-2 text-xs sm:text-sm bg-surface-container-lowest text-primary border border-outline-variant/30 rounded-full font-semibold transition-all hover:bg-white hover:shadow-md self-start sm:self-center">
-                View Reports
-              </button>
+        <section className="bg-surface-container-low rounded-xl p-3 sm:p-4 flex flex-col flex-1 min-h-0 overflow-hidden shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2 shrink-0">
+            <div>
+              <h3 className="text-base font-bold font-manrope text-on-surface leading-tight">Recent outbound</h3>
+              <p className="text-on-surface-variant text-[11px] sm:text-xs">stock_movements · type out</p>
             </div>
           </div>
-        </div>
+          <div className="bg-surface-container-lowest rounded-lg overflow-hidden flex-1 min-h-0 border border-outline-variant/10">
+            <div className="overflow-x-auto overflow-y-auto max-h-[280px] lg:max-h-[320px]">
+              <table className="w-full text-left border-collapse min-w-[480px] text-xs sm:text-sm">
+                <thead className="sticky top-0 bg-surface-container-lowest z-[1] shadow-sm">
+                  <tr className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 border-b border-surface-container">
+                    <th className="px-3 sm:px-4 py-2">Item</th>
+                    <th className="px-3 sm:px-4 py-2">SKU</th>
+                    <th className="px-3 sm:px-4 py-2 text-right">Qty</th>
+                    <th className="px-3 sm:px-4 py-2">To / ref</th>
+                    <th className="px-3 sm:px-4 py-2">When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentError ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-3 text-error">
+                        {recentError}
+                      </td>
+                    </tr>
+                  ) : recentLoading ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-3 text-on-surface-variant">
+                        Loading…
+                      </td>
+                    </tr>
+                  ) : recentOut.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-3 text-on-surface-variant">
+                        Walang outbound movement. Mag-insert ng <code className="text-[10px]">stock_movements</code> na{" "}
+                        <code className="text-[10px]">out</code> para sa deliver flow.
+                      </td>
+                    </tr>
+                  ) : (
+                    recentOut.map((m) => {
+                      const inv = m.inventory_items;
+                      const item = Array.isArray(inv) ? inv[0] : inv;
+                      const when = m.created_at ? new Date(m.created_at).toLocaleString() : "—";
+                      return (
+                        <tr key={m.id} className="border-t border-surface-container/30 hover:bg-surface-container-low/40">
+                          <td className="px-3 sm:px-4 py-2 font-medium truncate max-w-[10rem]">{item?.name ?? "—"}</td>
+                          <td className="px-3 sm:px-4 py-2 font-mono text-[11px]">{item?.sku ?? "—"}</td>
+                          <td className="px-3 sm:px-4 py-2 text-right">-{Math.abs(m.quantity ?? 0)}</td>
+                          <td className="px-3 sm:px-4 py-2 truncate max-w-[8rem]" title={m.to_location || ""}>
+                            {m.to_location || m.reference_type || "—"}
+                          </td>
+                          <td className="px-3 sm:px-4 py-2 text-on-surface-variant whitespace-nowrap">{when}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </main>
 
       <DeliverScanModal open={activeModal === "scan"} onClose={closeModal} />
@@ -139,17 +233,17 @@ export default function DeliverInventory() {
           <span className="material-symbols-outlined">input</span>
           <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Receive</span>
         </Link>
-        <button type="button" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
+        <Link to="/transfer" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
           <span className="material-symbols-outlined">sync_alt</span>
           <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Transfer</span>
-        </button>
+        </Link>
         <button type="button" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
           <span className="material-symbols-outlined">precision_manufacturing</span>
           <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Work</span>
         </button>
         <div className="flex flex-col items-center justify-center bg-blue-50 text-blue-700 rounded-xl px-4 py-1">
           <span className="material-symbols-outlined text-primary">local_shipping</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Ship</span>
+          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Deliver</span>
         </div>
         <button type="button" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
           <span className="material-symbols-outlined">fact_check</span>

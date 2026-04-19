@@ -1,0 +1,10 @@
+# Requires ./upstream/ (run fetch-upstream.ps1 first) and .env
+# Docker Compose v2.24+ with "include" support
+
+name: inventory-supabase
+
+include:
+  - path: ./upstream/docker-compose.yml
+    env_file:
+      - path: .env
+        required: true

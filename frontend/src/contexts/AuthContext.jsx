@@ -22,7 +22,9 @@ export function AuthProvider({ children }) {
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('id,email,first_name,last_name,avatar_url,department,location,phone,is_active,role_id')
+      .select(
+        'id,email,first_name,last_name,avatar_url,department,location,phone,is_active,role_id,organization_id,organizations(name)'
+      )
       .eq('id', authUser.id)
       .maybeSingle()
 
@@ -31,7 +33,12 @@ export function AuthProvider({ children }) {
       return
     }
 
-    let next = data ?? null
+    const orgName = data?.organizations?.name ?? null
+    let next = data ? { ...data, organization_name: orgName } : null
+    if (next && 'organizations' in next) {
+      const { organizations: _removed, ...rest } = next
+      next = rest
+    }
     if (next?.role_id) {
       const { data: roleRow } = await supabase
         .from('roles')

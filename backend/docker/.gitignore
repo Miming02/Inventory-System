@@ -1,0 +1,4 @@
+upstream/
+supabase-src.tgz
+supabase-git-tmp/
+.env
