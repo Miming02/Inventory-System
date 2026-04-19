@@ -44,3 +44,4 @@ This document aligns your template **0.7** with what exists **today** and what i
 | Version | Date | Notes |
 |---------|------|--------|
 | 1.0 | 2026-04-19 | Honest 0.7 status for compliance checklist. |
+| 1.1 | 2026-04-19 | Notifications + storage implementation notes. |
