@@ -63,6 +63,8 @@ This document aligns your template **0.7** with what exists **today** and what i
 
 Sa **app** (naka-login), `create_notification` gamit ang `auth.uid()` ay gumagana pa rin tulad dati.
 
+**Kung sa SQL Editor ay `not authenticated` pa rin:** ang session minsan ay hindi `rolsuper`. I-run ang updated **`005_create_notification_allow_sql_editor.sql`** (may check sa `is_superuser` at `session_user IN ('postgres','supabase_admin')`). O gumamit ng direktang `INSERT` sa `notifications` bilang fallback.
+
 ---
 
 ## Revision

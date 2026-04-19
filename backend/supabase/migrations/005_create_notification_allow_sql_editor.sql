@@ -16,15 +16,22 @@ SET search_path = public
 AS $$
 DECLARE
   new_id uuid;
-  v_superuser boolean;
+  v_sql_editor_ok boolean;
 BEGIN
   IF auth.uid() IS NOT NULL THEN
     IF p_user_id IS DISTINCT FROM auth.uid() AND public.current_role_name() IS DISTINCT FROM 'Admin' THEN
       RAISE EXCEPTION 'forbidden';
     END IF;
   ELSE
-    v_superuser := (SELECT r.rolsuper FROM pg_roles AS r WHERE r.rolname = session_user LIMIT 1);
-    IF COALESCE(v_superuser, false) IS NOT TRUE THEN
+    -- No JWT: SQL Editor (Dashboard) or service_role. Supabase often sets postgres.rolsuper = false;
+    -- use is_superuser + known dashboard roles + optional service_role claim.
+    v_sql_editor_ok := (
+      COALESCE(current_setting('is_superuser', true), '') = 'on'
+      OR session_user IN ('postgres', 'supabase_admin')
+      OR COALESCE((SELECT r.rolsuper FROM pg_roles r WHERE r.rolname = session_user), false)
+      OR COALESCE(current_setting('request.jwt.claim.role', true), '') = 'service_role'
+    );
+    IF v_sql_editor_ok IS NOT TRUE THEN
       RAISE EXCEPTION 'not authenticated';
     END IF;
     IF p_user_id IS NULL THEN
