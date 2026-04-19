@@ -1,0 +1,256 @@
+openapi: 3.0.3
+info:
+  title: Inventory System — Supabase integration API
+  version: 2.0.0
+  description: |
+    **Authoritative contract for this repository:** the SPA talks to **Supabase**
+    (Auth SDK + PostgREST + Edge Functions), not to a standalone Node server on `localhost:3000`.
+
+    - **Auth:** Use `@supabase/supabase-js` (`signInWithPassword`, session refresh).  
+      Reference: https://supabase.com/docs/reference/javascript/auth-signinwithpassword  
+    - **Data:** PostgREST paths below are prefixed with `/rest/v1`. Send headers `apikey` (anon) and  
+      `Authorization: Bearer {access_token}`.  
+    - **Edge:** Function paths are prefixed with `/functions/v1`.
+
+    Table DDL: `backend/supabase/migrations/001_inventory_setup.sql`.  
+    BRD / architecture: `docs/SYSTEM_REQUIREMENTS.md`, `docs/SYSTEM_ARCHITECTURE.md`.
+
+servers:
+  - url: "{SUPABASE_URL}"
+    description: Supabase project base URL (same as `VITE_SUPABASE_URL`, no trailing slash)
+    variables:
+      SUPABASE_URL:
+        default: https://YOUR_PROJECT_REF.supabase.co
+        description: From Supabase project settings
+
+tags:
+  - name: PostgREST
+  - name: Edge Functions
+
+security:
+  - bearerAuth: []
+
+paths:
+  /rest/v1/profiles:
+    get:
+      tags: [PostgREST]
+      summary: List or filter profiles (RLS applies)
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: select
+          in: query
+          description: PostgREST projection, e.g. `*,roles(name)`
+          schema:
+            type: string
+      responses:
+        "200":
+          description: JSON array of profile rows visible to caller
+        "401":
+          description: Missing or invalid JWT
+
+    patch:
+      tags: [PostgREST]
+      summary: Update profile row(s) allowed by RLS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Updated representation (with Prefer header) or empty
+        "403":
+          description: RLS denied
+
+  /rest/v1/inventory_items:
+    get:
+      tags: [PostgREST]
+      summary: List inventory items (RLS read for authenticated)
+      responses:
+        "200":
+          description: JSON array of items
+    post:
+      tags: [PostgREST]
+      summary: Create inventory item (RLS insert — Admin / Warehouse Staff / Procurement Staff)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryItemInsert"
+      responses:
+        "201":
+          description: Created
+        "403":
+          description: RLS denied
+
+  /rest/v1/purchase_orders:
+    get:
+      tags: [PostgREST]
+      summary: List purchase orders (RLS)
+      responses:
+        "200":
+          description: JSON array
+    post:
+      tags: [PostgREST]
+      summary: Create PO (Admin or Procurement Staff)
+      responses:
+        "201":
+          description: Created
+        "403":
+          description: RLS denied
+
+  /rest/v1/stock_movements:
+    get:
+      tags: [PostgREST]
+      summary: List stock movements (RLS)
+      responses:
+        "200":
+          description: JSON array
+    post:
+      tags: [PostgREST]
+      summary: Insert movement (Admin or Warehouse Staff); may fire stock trigger
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockMovementInsert"
+      responses:
+        "201":
+          description: Created
+        "403":
+          description: RLS denied
+
+  /rest/v1/roles:
+    get:
+      tags: [PostgREST]
+      summary: List roles (authenticated read policy)
+      responses:
+        "200":
+          description: JSON array of role rows
+
+  /functions/v1/invite-user:
+    post:
+      tags: [Edge Functions]
+      summary: Admin invite user by email (updates profile role)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteUserRequest"
+      responses:
+        "200":
+          description: Invited and profile updated (or invited with warning)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteUserResponse"
+        "400":
+          description: Validation or Supabase invite error
+        "401":
+          description: Missing/invalid Bearer token
+        "403":
+          description: Caller is not Admin
+        "500":
+          description: Server error
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase access_token from Auth session
+
+  schemas:
+    InventoryItemInsert:
+      type: object
+      description: Minimal insert shape; full column set per migration DDL
+      required: [sku, name, unit_of_measure]
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        unit_of_measure:
+          type: string
+        description:
+          type: string
+        category_id:
+          type: string
+          format: uuid
+        current_stock:
+          type: integer
+        reorder_level:
+          type: integer
+
+    StockMovementInsert:
+      type: object
+      required: [item_id, movement_type, reference_type, quantity]
+      properties:
+        item_id:
+          type: string
+          format: uuid
+        movement_type:
+          type: string
+          enum: [in, out, transfer, adjustment]
+        reference_type:
+          type: string
+          enum: [purchase, sale, transfer, adjustment, disposal, return]
+        reference_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+        unit_cost:
+          type: number
+        from_location:
+          type: string
+        to_location:
+          type: string
+        notes:
+          type: string
+
+    InviteUserRequest:
+      type: object
+      required: [email, fullName, roleId]
+      properties:
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        roleId:
+          type: string
+          format: uuid
+
+    InviteUserResponse:
+      oneOf:
+        - type: object
+          required: [ok, userId]
+          properties:
+            ok:
+              type: boolean
+              const: true
+            userId:
+              type: string
+              format: uuid
+        - type: object
+          required: [ok, userId, warning]
+          properties:
+            ok:
+              type: boolean
+              const: true
+            userId:
+              type: string
+              format: uuid
+            warning:
+              type: string

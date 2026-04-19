@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build / cache
+frontend/dist/
+*.log
+.npm
+.cache
+
+# Environment (never commit secrets)
+.env
+.env.local
+!.env.example
+!**/.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+
+# Local tooling
+coverage/
