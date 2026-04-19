@@ -11,7 +11,7 @@
 
 ## 1. Purpose
 
-Define business requirements, modular scope, role capabilities, business rules, and acceptance criteria so design, development, and testing stay aligned. Stakeholder approval is recorded in section 8.
+Define business requirements, modular scope, role capabilities, business rules, and acceptance criteria so design, development, and testing stay aligned. Optional formal approvals are described in §8 (solo / academic baseline).
 
 ---
 
@@ -95,54 +95,26 @@ Canonical role names **must** match database seeds (`roles.name`) and the UI nor
 | AC-04 | Unauthorized users cannot access protected routes (unauthenticated redirect to `/login`). | Manual / e2e test. |
 | AC-05 | Non-Admin cannot open `/users` (redirect per `RoleGuard`). | Manual / e2e test. |
 | AC-06 | Non-Admin cannot invoke invite-user successfully (403 from function). | API test with non-Admin JWT. |
-| AC-07 | Stakeholder sign-off recorded in section 8. | Signed rows present. |
+| AC-07 | Requirements baseline recorded for this release. | BRD version + revision history (§9); formal multi-stakeholder sign-off **N/A** for solo/academic build unless course requires it (see §8). |
 
 ---
 
 ## 7. User flow (requirements lifecycle)
 
-1. Gather and refine requirements with stakeholders.  
+1. Gather and refine requirements (self / advisor / client as applicable).  
 2. Map requirements to modules and routes.  
 3. Confirm roles and RLS alignment.  
 4. Freeze BRD version for a release.  
-5. Obtain sign-off (section 8).  
-6. Implement and test against AC-01–AC-06.  
+5. Optional: external stakeholder sign-off — **skip for solo project** (see §8).  
+6. Implement and test against AC-01–AC-06 (+ AC-07 as above).  
 
 ---
 
-## 8. Stakeholder approval
+## 8. Approvals (solo / academic project)
 
-Ang seksyong ito ay **opisyal na tala ng apruba** sa BRD na ito. Hindi ito awtomatikong pupunan ng tool — **ikaw / ang team** ang maglalagay ng totoong pangalan, petsa, at paraan ng pirma ayon sa polisiya ng organisasyon (HR, PMO, o quality).
+**Multi-stakeholder sign-off is not required** for this baseline: the author maintains the BRD in Git, and `AC-07` is satisfied by versioned requirements in this file plus revision history.
 
-### 8.1 Paano punan (hakbang)
-
-1. **Tukuyin sino ang stakeholders** na kailangang umaprubahan ng requirements (hal. Product Owner, Operations lead, IT/Tech lead). Baguhin ang mga titulo sa talahanayan kung iba ang istruktura ninyo (hal. “Department Manager”, “CFO”).
-2. **Ipadala ang BRD** (PDF export mula sa Markdown, o link sa repo/docs) para mabasa. Puwedeng meeting + “approved as read”.
-3. **Punan ang bawat hilera:**
-   - **Name** — buong pangalan ng taong humahawak ng desisyon (o initials kung pinapayagan ng kompanya).
-   - **Role / title** — opisyal na posisyon.
-   - **Decision** — halimbawa: `Approved`, `Approved with comments`, o `Rejected` (kung rejected, magdagdag ng notes sa ibaba o appendix).
-   - **Date** — petsa ng desisyon, formatong `YYYY-MM-DD` (hal. `2026-04-20`).
-   - **Signature** — **wet signature** (scan), **digital** (DocuSign / Adobe Sign), o tekstuwal na sanggunian gaya ng: `Email approval 2026-04-20 — see Appendix A` o ticket URL.
-4. **Magdagdag ng hilera** kung mas marami ang kailangan (Legal, Finance, atbp.).
-5. Kung **electronic approval** lang (Slack/email), maglagay ng **Appendix** (seksyon sa dulo ng file o hiwalay na PDF) na may buod ng mensahe + petsa + link.
-
-### 8.2 English (how to complete)
-
-1. Identify who must approve this BRD for your organization.  
-2. Share the document (export or repo link) and record their decision.  
-3. Fill **Name**, **Role / title**, **Decision**, **Date** (`YYYY-MM-DD`), and **Signature** (ink scan, e-sign reference, or “see Appendix / ticket #…”).  
-4. Add rows or appendices as your process requires.
-
-### 8.3 Talahanayan (punanin)
-
-| Name | Role / title | Decision | Date | Signature |
-|------|----------------|----------|------|-----------|
-| *[Pangalan]* | Product owner | Approved / comments | YYYY-MM-DD | |
-| *[Pangalan]* | Operations lead | Approved / comments | YYYY-MM-DD | |
-| *[Pangalan]* | Technical lead | Approved / comments | YYYY-MM-DD | |
-
-_I-delete ang `*[Pangalan]*` placeholder kapag may tunay nang entry. Electronic approval (ticket / PDF) ay maaaring ilagay sa appendix._
+If a course later requires named approvers, add a short table here or attach a PDF.
 
 ---
 
@@ -151,3 +123,4 @@ _I-delete ang `*[Pangalan]*` placeholder kapag may tunay nang entry. Electronic 
 | Version | Date | Summary |
 |---------|------|---------|
 | 1.0 | 2026-04-19 | Initial BRD aligned with repository implementation. |
+| 1.1 | 2026-04-19 | §8 simplified for solo build; AC-07 updated. |

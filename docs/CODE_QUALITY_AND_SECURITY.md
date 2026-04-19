@@ -18,7 +18,7 @@
 | Field | Implementation |
 |-------|----------------|
 | **Global UI** | `frontend/src/components/ErrorBoundary.jsx` wraps the app in `main.jsx` to avoid white-screen crashes. |
-| **API errors** | Supabase client returns `{ data, error }`; surface `error.message` to users on forms (pattern in `Login.jsx`). |
+| **API errors** | `frontend/src/lib/errors.js` — `getErrorMessage(err)` for consistent copy; used in `Login.jsx`, inventory load, audit page, notification bell. |
 | **Logging** | Use browser devtools during development; production logging can be extended (Sentry, etc.) — not bundled by default. |
 
 **Roadmap:** centralize HTTP/error shape if a Node BFF is added later.

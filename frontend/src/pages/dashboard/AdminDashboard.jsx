@@ -18,6 +18,7 @@ import {
   overviewCardKeysForRole,
   roleDashboardSubtitle,
 } from "../../lib/roleAccess";
+import { NotificationBell } from "../../components/NotificationBell";
 
 const EXECUTIVE_AVATAR =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuAl1vk9F7RfgWZM_t-HHQpHI3L6Y8fXmpjBEPHYc0sQICv8jLjYpb3L8OiuJGEAZUvHLiy7WGfdbKsdDzsCt6cZbvzeH04HRARIk8YHMYO7xv2jlsKnVH4IgPvoMpSsPkw5BIfsmIBM0bTWcaePqC9m5I5JYvzlPHE33B3xdZBSYh_V6gcrR_mUzcETM_eRDPvynPoxUX5Gp3-FsjpFJjfwJhsJqdBydQVOmUzwJm4RjneVEWxoFMPZjKzHBveLX1PffNzqSLBYa5Q";
@@ -510,12 +511,7 @@ export default function AdminDashboard() {
               />
             </div>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className="p-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 rounded-lg transition-all active:scale-95 duration-200 text-slate-500 dark:text-slate-400"
-              >
-                <span className="material-symbols-outlined">notifications</span>
-              </button>
+              <NotificationBell />
               <button
                 type="button"
                 className="p-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 rounded-lg transition-all active:scale-95 duration-200 text-slate-500 dark:text-slate-400"
@@ -546,6 +542,16 @@ export default function AdminDashboard() {
                     >
                       <span className="material-symbols-outlined text-lg">admin_panel_settings</span>
                       <span>Users</span>
+                    </Link>
+                  )}
+                  {canManageUsers(role) && (
+                    <Link
+                      to="/audit-logs"
+                      onClick={() => setShowUserDropdown(false)}
+                      className="w-full px-4 py-2 text-left text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center gap-3"
+                    >
+                      <span className="material-symbols-outlined text-lg">history</span>
+                      <span>Audit log</span>
                     </Link>
                   )}
                   <button

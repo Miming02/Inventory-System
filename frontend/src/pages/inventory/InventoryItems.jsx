@@ -1,86 +1,118 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { supabase } from "../../lib/supabase";
+import { getErrorMessage } from "../../lib/errors";
 
 const PROFILE_AVATAR =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuC3rGj7qr2aPKn-aDazX5JyZOWtjZSfFs7ynUSWFgOdXoZl8JSZtJnU8AmzO93YbmLDD3UagiwIkO-cYwGM-I96muKw1o6vgBx38gNLO-471HIM0W991dVDYARTJdZuy0wudiWdGoULieayLZjYzDoyB9OcUpRhkWnhCqMCJ577usPnDSsSVv_WKMpFtzeyiGUH9xBDZ3ZduLdbHL3FC7iNROxpi3w07e0Tw1YmMpNsguKvNINdfRZtlbKGZW660Fr7VVdrKABEM5s";
 
-const inventoryRows = [
-  {
-    id: "1",
-    name: "Chronos Slate Watch",
-    subtitle: "V-Series / Premium",
-    sku: "WA-CHR-001",
-    category: "Accessories",
-    unit: "Pieces",
-    qty: "420",
-    qtyTone: "default",
-    barTrack: "bg-primary-fixed",
-    barFill: "bg-primary",
-    barPct: "75%",
-    reorder: "50",
-    reorderBadge: null,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDbErp8DLqjf55JNZLktworSNMoSCQUzOu7-_r4FCmZRH3x38pgplNIGXAKWRcYHLad7N9R_a6mZfEi7PA_Jzf3oNmK8c2i1AnElQlv0NfUd_xmNy4SKMlqE_Amiu2ZAodkAG8lC_wEPeD-mW8E7khvr9u4nTFsbHeCfDQxKD7IWzg-TMIJnJcWFZ4fj85X4t_nzYGglcrGfBWVjp4ZleLsfhGV1eZNKRTkxJJ2auzlcdCe3uMN0JOslJpE-FKeXkZTjGdotEr-EDY",
-    imageAlt: "minimalist white wristwatch with silver accents on a clean light gray background with soft shadows"
-  },
-  {
-    id: "2",
-    name: "Aura Wireless Pods",
-    subtitle: "Audio / High-Fidelity",
-    sku: "AU-WRL-882",
-    category: "Electronics",
-    unit: "Units",
-    qty: "12",
-    qtyTone: "tertiary",
-    barTrack: "bg-tertiary-fixed",
-    barFill: "bg-tertiary",
-    barPct: "15%",
-    reorder: null,
-    reorderBadge: "Low Stock (20)",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuB4S46MscvysgBa65lfGuilahgRmr6vi6_IlBiXDjZpbK-2b1BFuBML1GDQ9-u6KlY90KD-ed4pmQ4zR33TdZtSBYtW9F2zy_y3x7AuHbmg0x2o9awsa2dC1Aw3To5xYoSlKWlA8rMsvyDWUS1o7gpe74JLIvTFMMEwBfv0_gLrQnh5heYFUcx4kjsrvo6PIuuBWLvndUgXP2RinFjQWYuTxvXWlpM8Tqvwnew5PCca3igGo-Xw3hqflMicX-VMq1G8vXWjYMxXRUI",
-    imageAlt: "professional studio shot of high-quality noise-canceling headphones with premium leather padding on a soft teal background"
-  },
-  {
-    id: "3",
-    name: "Lumina Lens 50mm",
-    subtitle: "Optics / Professional",
-    sku: "OP-LUM-50M",
-    category: "Photography",
-    unit: "Cases",
-    qty: "184",
-    qtyTone: "default",
-    barTrack: "bg-primary-fixed",
-    barFill: "bg-primary",
-    barPct: "55%",
-    reorder: "25",
-    reorderBadge: null,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDXwZMfLVyMa8_VKspQBto_a-_Oj9zAU2R5bSBaYPpaGLCquPSohf8l24hQhTcGWlkTmzCOwUxnI5saU2O5li5qXnVq8_FRy1MkzxGTAt059o2d7aIeXM0tU2Fu04KkFXWJkNrfXOCaW1eLZc3WlOeF8a1enukEoDqUlslEtKxKclBsFz_FoKI2i5hH7a8TXCV9EQdV7dMARqQ_i426XhjGgWDNjEjF7vGZZEgu_1WwRGGklFtF82hO50sXZfoCoxc5eeKyGVMBR3k",
-    imageAlt: "vintage style polaroid camera on a clean minimal surface with bright airy lighting and pastel blue backdrop"
-  },
-  {
-    id: "4",
-    name: "Swift Velocity V2",
-    subtitle: "Apparel / Footwear",
-    sku: "AP-SWF-V02",
-    category: "Fashion",
-    unit: "Pairs",
-    qty: "1,024",
-    qtyTone: "default",
-    barTrack: "bg-primary-fixed",
-    barFill: "bg-primary",
-    barPct: "90%",
-    reorder: "200",
-    reorderBadge: null,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuA83vSBur2-2kIcVYU-GOIyhyqGEtoaYk3zDbOl7ZCxOefdKsBXZm17g3XaNoIBqahytK61v-HZtfAN8R9cHjUbPtaa_OC0fpaYGw2d3w04pzNqDCr6EpejiyJslTIezjiffSXb1JyjCB2vcwpao0y1cx7NbND0fy286fmwRlPuOjb9rR_eXDp-A6lC22lWUWZ2x1D9jI8oMVZj6ffxG-kx66bPP0mL6z8KWdWNySH8Pa5oiS0IKI0iNGaTA9x9eUGflDYP23C01kE",
-    imageAlt: "bright red performance athletic shoe on a dark minimalist background with dramatic top lighting and sharp focus"
-  }
-];
+const PAGE_SIZE = 10;
+const PLACEHOLDER_IMG =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect fill="#e2e8f0" width="96" height="96"/><text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui">No image</text></svg>`
+  );
+
+/** Strip characters that break PostgREST `ilike` patterns */
+function sanitizeSearch(raw) {
+  return raw.trim().replace(/[%_\\]/g, "");
+}
+
+function mapInventoryRow(row) {
+  const stock = Number(row.current_stock ?? 0);
+  const reorder = row.reorder_level != null ? Number(row.reorder_level) : 20;
+  const low = stock <= reorder;
+  const cap = row.max_stock != null && row.max_stock > 0 ? Number(row.max_stock) : Math.max(stock, 1) * 2;
+  const barPctNum = Math.min(100, Math.round((stock / cap) * 100));
+  const cat = row.categories && typeof row.categories === "object" ? row.categories.name : null;
+  return {
+    id: row.id,
+    name: row.name ?? "—",
+    subtitle: row.description || row.location || row.sku || "—",
+    sku: row.sku ?? "—",
+    category: cat ?? "Uncategorized",
+    unit: row.unit_of_measure ?? "—",
+    qty: Number.isFinite(stock) ? String(stock) : "0",
+    qtyTone: low ? "tertiary" : "default",
+    barTrack: low ? "bg-tertiary-fixed" : "bg-primary-fixed",
+    barFill: low ? "bg-tertiary" : "bg-primary",
+    barPct: `${barPctNum}%`,
+    reorder: row.reorder_level != null ? String(row.reorder_level) : "—",
+    reorderBadge: low ? `Low (≤${reorder})` : null,
+    image: row.image_url || PLACEHOLDER_IMG,
+    imageAlt: row.name ?? "Product",
+  };
+}
 
 export default function InventoryItems() {
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [rows, setRows] = useState([]);
+  /** Total rows matching current search (for pagination). */
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  /** All inventory rows (summary). */
+  const [globalTotal, setGlobalTotal] = useState(0);
+  const [lowStockCount, setLowStockCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
+  const loadInventory = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    const term = sanitizeSearch(debouncedSearch);
+    const from = (page - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
+    let listQuery = supabase
+      .from("inventory_items")
+      .select("id,sku,name,description,unit_of_measure,current_stock,reorder_level,max_stock,image_url,location,categories(name)", {
+        count: "exact",
+      })
+      .order("name", { ascending: true })
+      .range(from, to);
+
+    if (term.length > 0) {
+      const p = `%${term}%`;
+      listQuery = listQuery.or(`name.ilike.${p},sku.ilike.${p}`);
+    }
+
+    const [listRes, totalRes, lowRes] = await Promise.all([
+      listQuery,
+      supabase.from("inventory_items").select("*", { count: "exact", head: true }),
+      supabase.from("inventory_items").select("*", { count: "exact", head: true }).lte("current_stock", 20),
+    ]);
+
+    if (listRes.error) {
+      setLoadError(getErrorMessage(listRes.error));
+      setRows([]);
+      setFilteredTotal(0);
+    } else {
+      setRows((listRes.data ?? []).map(mapInventoryRow));
+      setFilteredTotal(listRes.count ?? 0);
+    }
+    if (!totalRes.error) setGlobalTotal(totalRes.count ?? 0);
+    if (!lowRes.error) setLowStockCount(lowRes.count ?? 0);
+
+    setLoading(false);
+  }, [page, debouncedSearch]);
+
+  useEffect(() => {
+    loadInventory();
+  }, [loadInventory]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTotal / PAGE_SIZE));
+  const pageStart = filteredTotal === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(page * PAGE_SIZE, filteredTotal);
 
   return (
     <div className="bg-background text-on-surface antialiased min-h-screen pb-20 md:pb-0">
@@ -155,6 +187,8 @@ export default function InventoryItems() {
                 placeholder="Search inventory..."
                 type="search"
                 aria-label="Search inventory"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
               />
             </div>
             <div className="relative">
@@ -176,30 +210,35 @@ export default function InventoryItems() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
-            <span className="text-xs font-semibold text-primary uppercase tracking-widest mb-2 block">Total Value</span>
-            <div className="font-headline text-3xl font-extrabold text-on-surface">$1,284,000</div>
-            <div className="mt-2 flex items-center text-xs text-green-600 font-medium">
-              <span className="material-symbols-outlined text-sm mr-1">trending_up</span> +4.2% from last month
-            </div>
+        {loadError ? (
+          <div className="mb-6 rounded-2xl border border-error/30 bg-error-container/30 text-on-error-container px-4 py-3 text-sm">
+            {loadError}
           </div>
+        ) : null}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
             <span className="text-xs font-semibold text-secondary uppercase tracking-widest mb-2 block">Active SKUs</span>
-            <div className="font-headline text-3xl font-extrabold text-on-surface">4,892</div>
-            <div className="mt-2 text-xs text-on-surface-variant font-medium">Across 4 warehouses</div>
+            <div className="font-headline text-3xl font-extrabold text-on-surface">
+              {loading ? "…" : globalTotal.toLocaleString()}
+            </div>
+            <div className="mt-2 text-xs text-on-surface-variant font-medium">From Supabase inventory_items</div>
           </div>
           <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
-            <span className="text-xs font-semibold text-tertiary uppercase tracking-widest mb-2 block">Critical Stock</span>
-            <div className="font-headline text-3xl font-extrabold text-tertiary">12</div>
+            <span className="text-xs font-semibold text-tertiary uppercase tracking-widest mb-2 block">Low stock (≤20)</span>
+            <div className="font-headline text-3xl font-extrabold text-tertiary">
+              {loading ? "…" : lowStockCount.toLocaleString()}
+            </div>
             <div className="mt-2 flex items-center text-xs text-tertiary font-medium">
-              <span className="material-symbols-outlined text-sm mr-1">warning</span> Action required
+              <span className="material-symbols-outlined text-sm mr-1">warning</span> Review reorder levels
             </div>
           </div>
           <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
-            <span className="text-xs font-semibold text-primary uppercase tracking-widest mb-2 block">Processing</span>
-            <div className="font-headline text-3xl font-extrabold text-on-surface">84</div>
-            <div className="mt-2 text-xs text-on-surface-variant font-medium">Outbound shipments today</div>
+            <span className="text-xs font-semibold text-primary uppercase tracking-widest mb-2 block">Matching filter</span>
+            <div className="font-headline text-3xl font-extrabold text-on-surface">
+              {loading ? "…" : filteredTotal.toLocaleString()}
+            </div>
+            <div className="mt-2 text-xs text-on-surface-variant font-medium">Rows matching search + list</div>
           </div>
         </div>
 
@@ -218,7 +257,21 @@ export default function InventoryItems() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/5 dark:divide-slate-700/50">
-                {inventoryRows.map((row) => (
+                {loading ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-on-surface-variant">
+                      Loading inventory…
+                    </td>
+                  </tr>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-on-surface-variant">
+                      No items found. Add rows in Supabase or clear your search.
+                    </td>
+                  </tr>
+                ) : null}
+                {!loading &&
+                  rows.map((row) => (
                   <tr key={row.id} className="hover:bg-surface-container/30 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-4">
@@ -283,39 +336,35 @@ export default function InventoryItems() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ))}
               </tbody>
             </table>
           </div>
           <div className="px-6 py-4 bg-surface-container-low/30 dark:bg-slate-800/30 border-t border-outline-variant/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-on-surface-variant text-center sm:text-left">Showing 1 to 4 of 4,892 items</p>
-            <div className="flex gap-2">
+            <p className="text-sm text-on-surface-variant text-center sm:text-left">
+              {filteredTotal === 0
+                ? "No items"
+                : `Showing ${pageStart} to ${pageEnd} of ${filteredTotal.toLocaleString()} items`}
+            </p>
+            <div className="flex gap-3 items-center flex-wrap justify-center sm:justify-end">
+              <span className="text-xs text-on-surface-variant font-medium">
+                Page {page} of {totalPages}
+              </span>
               <button
                 type="button"
                 className="p-2 bg-surface-container-highest rounded-lg text-on-surface hover:bg-surface-container-high transition-colors active:scale-95 disabled:opacity-50"
                 aria-label="Previous page"
-                disabled={page <= 1}
+                disabled={page <= 1 || loading}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
                 <span className="material-symbols-outlined text-sm">chevron_left</span>
               </button>
-              {[1, 2, 3].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setPage(n)}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors active:scale-95 ${
-                    page === n ? "bg-primary text-on-primary" : "hover:bg-surface-container-high text-on-surface"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
               <button
                 type="button"
-                className="p-2 bg-surface-container-highest rounded-lg text-on-surface hover:bg-surface-container-high transition-colors active:scale-95"
+                className="p-2 bg-surface-container-highest rounded-lg text-on-surface hover:bg-surface-container-high transition-colors active:scale-95 disabled:opacity-50"
                 aria-label="Next page"
-                onClick={() => setPage((p) => Math.min(3, p + 1))}
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
                 <span className="material-symbols-outlined text-sm">chevron_right</span>
               </button>

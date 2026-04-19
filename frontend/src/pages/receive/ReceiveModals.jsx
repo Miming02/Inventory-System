@@ -1,4 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "../../contexts/AuthContext";
+import { uploadAttachment } from "../../lib/storageUpload";
+import { getErrorMessage } from "../../lib/errors";
 
 const PREVIEW_ITEMS = [
   {
@@ -434,6 +437,25 @@ export function ManualEntryModal({ open, onClose }) {
 
 export function BatchUploadModal({ open, onClose }) {
   useModalA11y(open, onClose);
+  const { user } = useAuth();
+  const [csvMsg, setCsvMsg] = useState("");
+  const [attachMsg, setAttachMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleUpload = async (file, kind, setMsg) => {
+    setMsg("");
+    if (!user?.id || !file) return;
+    setBusy(true);
+    try {
+      const { path } = await uploadAttachment(user.id, file, kind);
+      setMsg(`Uploaded: ${path}`);
+    } catch (e) {
+      setMsg(getErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -474,7 +496,18 @@ export function BatchUploadModal({ open, onClose }) {
                 <span className="material-symbols-outlined text-4xl text-primary/40 group-hover:scale-110 transition-transform mb-3">cloud_upload</span>
                 <p className="text-sm font-medium text-on-surface">Drag and drop file here</p>
                 <p className="text-xs text-on-surface-variant mt-1">or click to browse from computer</p>
-                <input className="absolute inset-0 opacity-0 cursor-pointer" type="file" accept=".csv,.xlsx,.xls" />
+                {csvMsg ? <p className="text-xs mt-2 text-primary font-medium px-1">{csvMsg}</p> : null}
+                <input
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleUpload(f, "receive", setCsvMsg);
+                    e.target.value = "";
+                  }}
+                />
               </div>
             </div>
             <div className="grid grid-cols-1 gap-5">
@@ -512,13 +545,25 @@ export function BatchUploadModal({ open, onClose }) {
           </div>
           <div className="mb-10">
             <label className="text-sm font-bold font-manrope text-on-surface-variant block mb-3">Attachment (e.g. Bill of Lading)</label>
-            <div className="flex items-center gap-4 bg-surface-container-low p-4 rounded-2xl">
-              <span className="material-symbols-outlined text-on-surface-variant">attach_file</span>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-surface-container-low p-4 rounded-2xl">
+              <span className="material-symbols-outlined text-on-surface-variant shrink-0">attach_file</span>
               <p className="text-sm text-on-surface-variant flex-1">Upload supporting documentation (PDF/JPG)</p>
-              <button type="button" className="bg-surface-container-highest px-4 py-2 rounded-full text-xs font-bold text-primary hover:bg-primary/10 transition-colors">
+              <label className="bg-surface-container-highest px-4 py-2 rounded-full text-xs font-bold text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0">
                 Select File
-              </button>
+                <input
+                  className="absolute w-px h-px p-0 -m-px overflow-hidden opacity-0"
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,image/jpeg,image/png,application/pdf"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleUpload(f, "receive-docs", setAttachMsg);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
             </div>
+            {attachMsg ? <p className="text-xs mt-2 text-primary font-medium">{attachMsg}</p> : null}
           </div>
           <div className="space-y-4">
             <div className="flex justify-between items-center flex-wrap gap-2">

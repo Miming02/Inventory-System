@@ -84,7 +84,7 @@ Kung may error na “nothing to commit” — posibleng na-commit mo na dati; ok
 Palitan ang URL ng **iyo**:
 
 ```powershell
-git remote add origin https://github.com/USERNAME/Inventory-System.git
+git remote add origin https://github.com/Miming02/Inventory-System.git
 ```
 
 Kung nagkamali ka ng URL:
@@ -137,13 +137,26 @@ Sa Windows, maaaring i-save ng **Git Credential Manager** ang credentials para h
 
 ---
 
+## 9. GitHub Actions (CI) — paano makita kung “green”
+
+Ang repo may workflow: `.github/workflows/frontend-ci.yml` (nag-`npm ci`, `npm run lint`, `npm run build` sa `frontend/`).
+
+1. **I-push** muna ang commits mo (`git push`).  
+2. Sa GitHub, buksan ang repo → tab na **Actions**.  
+3. Piliin ang pinakabagong run ng **Frontend CI**.  
+4. **Green check** = pass; **pulang X** = buksan ang job → basahin ang log (hal. lint error).
+
+*Note:* Una mong push na may workflow file ang magpapakita ng Actions; kung walang workflow noon, walang tab na ganoon.*
+
+---
+
 ## Problema na madalas
 
 | Sintomas | Gawin |
 |----------|--------|
 | `remote origin already exists` | `git remote remove origin` tapos `git remote add origin ...` ulit |
 | `failed to push` / authentication | Gumawa ulit ng PAT; tiyaking may scope na **repo** |
-| `src refspec main does not exist` | `git branch -M main` muna, o i-push ang branch na mayroon ka: `git branch` para makita |
+| `src refspec main does not match any` | **(1)** Typo: dapat `git branch -M main` (hindi `mainx`). **(2)** Kung maling pangalan ng branch: `git branch` — i-push ang tamang pangalan, hal. `git push -u origin mainx`, *o* gumawa ng `main`: `git checkout -b main` tapos `git push -u origin main`. **(3)** Kung walang commit pa: `git add .` → `git commit -m "..."` muna. |
 
 ---
 

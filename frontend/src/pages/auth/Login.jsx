@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { getErrorMessage } from "../../lib/errors";
 
 export default function Login() {
   const [formData, setFormData] = useState({
@@ -39,13 +40,13 @@ export default function Login() {
       const { error } = await login(formData.email, formData.password);
       
       if (error) {
-        setError(error.message);
+        setError(getErrorMessage(error));
       } else {
         // On successful login, redirect to dashboard
         navigate("/");
       }
-    } catch {
-      setError("Login failed. Please try again.");
+    } catch (e) {
+      setError(getErrorMessage(e) || "Login failed. Please try again.");
     } finally {
       setIsLoading(false);
     }

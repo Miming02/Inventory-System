@@ -417,5 +417,14 @@ CREATE POLICY "Stock movements write by warehouse/admin" ON stock_movements
   FOR INSERT WITH CHECK (public.current_role_name() IN ('Admin', 'Warehouse Staff'));
 
 -- ========================================
+-- Optional: audit_logs RLS (run after base setup; see migrations/002_audit_logs_rls.sql)
+-- ========================================
+-- ALTER FUNCTION public.audit_trigger() SECURITY DEFINER;
+-- ALTER FUNCTION public.audit_trigger() SET search_path = public;
+-- ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Admins can read audit_logs" ON public.audit_logs
+--   FOR SELECT USING (public.current_role_name() = 'Admin');
+
+-- ========================================
 -- Setup Complete!
 -- ========================================

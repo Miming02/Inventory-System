@@ -58,6 +58,7 @@ const PATH_ROLES = {
   "/dispose": ["Admin", "Warehouse Staff"],
   "/purchase-orders": ["Admin", "Procurement Staff", "Management"],
   "/users": ["Admin"],
+  "/audit-logs": ["Admin"],
 };
 
 /**

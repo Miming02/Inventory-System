@@ -8,9 +8,9 @@ This document aligns your template **0.7** with what exists **today** and what i
 |-------|--------|
 | **Action / user / timestamp / module** | **Database:** `audit_logs` stores `action` (TG_OP), `user_id`, `created_at`, `table_name`, `record_id`, optional JSON snapshots. Triggers on `profiles`, `inventory_items`, `purchase_orders` (see migration). |
 | **Application logs** | Not centralized to a third-party service in-repo. |
-| **Admin audit UI** | **Not implemented** — future: read-only page querying `audit_logs` for Admin only (RLS policy required). |
+| **Admin audit UI** | **Implemented:** `frontend/src/pages/admin/AuditLogs.jsx` at `/audit-logs` (Admin). |
 
-**Acceptance gap to close later:** Admin screen or export for `audit_logs`; optional RLS policy for Admin read.
+**Database:** Run `backend/supabase/migrations/002_audit_logs_rls.sql` in Supabase so `audit_trigger` stays `SECURITY DEFINER` and only Admins can `SELECT` from `audit_logs`.
 
 ---
 
@@ -18,11 +18,11 @@ This document aligns your template **0.7** with what exists **today** and what i
 
 | Field | Status |
 |-------|--------|
-| **Upload UI** | Present in several flows (e.g. batch / documentation copy in receive/deliver modals). |
-| **Backend storage** | **Not wired** in `frontend/src` to `supabase.storage` yet. |
-| **Validation** | When implemented: restrict MIME types and max size in client + **Supabase Storage policies** server-side. |
+| **Upload UI** | Receive **Batch upload** modal: CSV/Excel + supporting doc file inputs. |
+| **Backend storage** | `frontend/src/lib/storageUpload.js` → bucket **`attachments`**. Run migration **`004_storage_attachments.sql`** in Supabase. |
+| **Validation** | Client: max 5 MB, MIME allow-list in `storageUpload.js`; server: bucket `allowed_mime_types` + RLS on `storage.objects`. |
 
-**Next steps:** Create a bucket (e.g. `attachments`), policies per role, then `supabase.storage.from(...).upload()` with metadata linking `record_id`.
+**Paths:** `{user_id}/{kind}/{timestamp}-{filename}` under the private bucket.
 
 ---
 
@@ -30,11 +30,12 @@ This document aligns your template **0.7** with what exists **today** and what i
 
 | Field | Status |
 |-------|--------|
-| **Schema** | `notifications` table exists (user_id, title, message, type, is_read, action_url). |
-| **Triggers / delivery** | **Not fully implemented** — no universal “event → insert notification” layer in SQL or app yet. UI shows notification **icons** as chrome. |
-| **Delivery methods** | In-app rows are the natural fit; email/SMS would use Edge Functions + provider. |
+| **Schema** | `notifications` table + RLS + RPC **`create_notification`** — migration **`003_notifications_rls.sql`**. |
+| **UI** | `frontend/src/components/NotificationBell.jsx` on dashboard header: list, unread badge, mark read. |
+| **Creating rows** | Call `supabase.rpc('create_notification', { p_user_id, p_title, p_message, p_type, p_action_url })` — self or **Admin** for any user. |
+| **Delivery** | In-app; optional Realtime: enable replication for `notifications` in Supabase. |
 
-**Next steps:** Insert into `notifications` from key mutations (or Edge Function), add RLS for `SELECT` own rows, add bell dropdown fed by realtime or poll.
+**Test:** After `003`, as Admin run RPC once or insert via SQL for your `user_id`.
 
 ---
 

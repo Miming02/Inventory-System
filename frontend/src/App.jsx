@@ -9,6 +9,7 @@ import InventoryItems from "./pages/inventory/InventoryItems";
 import PurchaseOrders from "./pages/purchase-orders/PurchaseOrders";
 import Login from "./pages/auth/Login";
 import Users from "./pages/admin/Users";
+import AuditLogs from "./pages/admin/AuditLogs";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { canAccessPath } from "./lib/roleAccess";
 
@@ -137,6 +138,16 @@ export default function App() {
             <ProtectedRoute>
               <RoleGuard>
                 <Users />
+              </RoleGuard>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/audit-logs"
+          element={
+            <ProtectedRoute>
+              <RoleGuard>
+                <AuditLogs />
               </RoleGuard>
             </ProtectedRoute>
           }
