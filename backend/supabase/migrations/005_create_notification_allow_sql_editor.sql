@@ -16,15 +16,15 @@ SET search_path = public
 AS $$
 DECLARE
   new_id uuid;
-  is_super boolean;
+  v_superuser boolean;
 BEGIN
   IF auth.uid() IS NOT NULL THEN
     IF p_user_id IS DISTINCT FROM auth.uid() AND public.current_role_name() IS DISTINCT FROM 'Admin' THEN
       RAISE EXCEPTION 'forbidden';
     END IF;
   ELSE
-    SELECT rolsuper INTO is_super FROM pg_roles WHERE rolname = session_user;
-    IF is_super IS NOT TRUE THEN
+    v_superuser := (SELECT r.rolsuper FROM pg_roles AS r WHERE r.rolname = session_user LIMIT 1);
+    IF COALESCE(v_superuser, false) IS NOT TRUE THEN
       RAISE EXCEPTION 'not authenticated';
     END IF;
     IF p_user_id IS NULL THEN
