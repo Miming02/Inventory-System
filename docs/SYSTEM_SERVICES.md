@@ -35,7 +35,33 @@ This document aligns your template **0.7** with what exists **today** and what i
 | **Creating rows** | Call `supabase.rpc('create_notification', { p_user_id, p_title, p_message, p_type, p_action_url })` — self or **Admin** for any user. |
 | **Delivery** | In-app; optional Realtime: enable replication for `notifications` in Supabase. |
 
-**Test:** After `003`, as Admin run RPC once or insert via SQL for your `user_id`.
+**Test from SQL Editor:** Walang JWT doon, kaya **`auth.uid()` ay NULL`**. Dalawang paraan:
+
+1. **Pagkatapos mag-run ng `005_create_notification_allow_sql_editor.sql`** (o updated `003`), gamitin ang **totoong user id** (mula Authentication → Users o query sa `auth.users`):
+
+   ```sql
+   SELECT public.create_notification(
+     'DITO-ILAGAY-ANG-UUID-NG-USER'::uuid,
+     'Welcome',
+     'Notifications are working.',
+     'info',
+     NULL
+   );
+   ```
+
+2. **O direktang INSERT** (postgres role, bypass RLS):
+
+   ```sql
+   INSERT INTO public.notifications (user_id, title, message, type)
+   VALUES (
+     'DITO-ANG-USER-UUID'::uuid,
+     'Welcome',
+     'Notifications are working.',
+     'info'
+   );
+   ```
+
+Sa **app** (naka-login), `create_notification` gamit ang `auth.uid()` ay gumagana pa rin tulad dati.
 
 ---
 
