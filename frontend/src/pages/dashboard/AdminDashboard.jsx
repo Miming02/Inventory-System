@@ -12,10 +12,8 @@ import {
   canSeeMovementVelocity,
   canSeeOverviewCard,
   canSeeStockShare,
-  canShowReportsCard,
   normalizeRole,
   overviewCardKeysForRole,
-  roleDashboardSubtitle,
 } from "../../lib/roleAccess";
 import { NotificationBell } from "../../components/NotificationBell";
 import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
@@ -83,43 +81,55 @@ const overviewCards = [
 const expeditedOperations = [
   {
     icon: "input_circle",
-    title: "Receive Inventory",
+    title: "Receive",
     text: "Process new stock arrivals and audit manifest documents.",
     to: "/receive",
     primary: true
   },
   {
     icon: "move_item",
-    title: "Internal Transfer",
+    title: "Transfer",
     text: "Reallocate existing stock between warehouses and kitchens.",
     to: "/transfer"
   },
   {
     icon: "local_shipping",
-    title: "Deliver Order",
+    title: "Deliver",
     text: "Record outbound deliveries and ship curated inventory to regional fulfillment points.",
     to: "/deliver"
   },
-    {
+  {
     icon: "checklist",
-    title: "Count Inventory",
+    title: "Count",
     text: "Perform physical audits and reconcile stock level discrepancies.",
     to: "/count"
   },
   {
     icon: "delete_sweep",
-    title: "Dispose Inventory",
+    title: "Dispose",
     text: "Manage write-offs for damaged, expired, or obsolete assets.",
     to: "/dispose"
+  },  
+  {
+    icon: "precision_manufacturing",
+    title: "Produce",
+    text: "Produce finished goods and automatically deduct components based on BOM.",
+    to: "/consume"
   }
 ];
 
 const managementControl = [
   {
-    icon: "package_2",
-    title: "Inventory Items",
-    text: "Manage items, categories, variants, and SKUs. Track stock details and maintain accurate product records.",
+    icon: "inventory_2",
+    title: "View Storage",
+    text: "View all inventory in storage by location, SKU, and stock levels.",
     to: "/inventory"
+  },
+  {
+    icon: "settings",
+    title: "System Settings",
+    text: "Manage users, audit logs, approvals, and master data.",
+    to: "/settings"
   },
   {
     icon: "assignment",
@@ -128,9 +138,10 @@ const managementControl = [
     to: "/purchase-orders"
   },
   {
-    icon: "bar_chart",
-    title: "Reports & Analytics",
-    text: "View inventory reports, stock levels, movement history, and system insights."
+    icon: "summarize",
+    title: "Generate Report",
+    text: "Direct shortcuts to inventory items and purchase orders reporting.",
+    to: "/reports"
   }
 ];
 
@@ -152,6 +163,14 @@ function profileDisplayName(p) {
   return p.email || "Team member";
 }
 
+function profileLabelFromRow(p) {
+  if (!p) return "Team member";
+  const fn = (p.first_name || "").trim();
+  const ln = (p.last_name || "").trim();
+  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
+  return p.email || "Team member";
+}
+
 function movementActionLabel(movementType) {
   const t = (movementType || "").toLowerCase();
   if (t === "in") return "IN";
@@ -162,18 +181,16 @@ function movementActionLabel(movementType) {
 
 function ExpeditedCard({ icon, title, text, to, primary }) {
   const className = primary
-    ? "group relative flex flex-col items-start p-8 rounded-2xl bg-gradient-to-br from-primary to-primary-container text-white text-left transition-all hover:scale-[1.02] hover:shadow-xl hover:shadow-primary/20 active:scale-95 overflow-hidden"
-    : "group flex flex-col items-start p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/10 dark:border-slate-700/40 text-on-surface text-left transition-all hover:bg-surface-bright hover:shadow-lg active:scale-95";
+    ? "group relative flex flex-col items-start p-4 rounded-xl bg-gradient-to-br from-primary to-primary-container text-white text-left transition-all hover:scale-[1.01] hover:shadow-lg hover:shadow-primary/20 active:scale-95 overflow-hidden min-h-[142px]"
+    : "group flex flex-col items-start p-4 rounded-xl bg-surface-container-lowest border border-outline-variant/10 dark:border-slate-700/40 text-on-surface text-left transition-all hover:bg-surface-bright hover:shadow-lg active:scale-95 min-h-[142px]";
 
   const inner = (
     <>
-      <span
-        className={`material-symbols-outlined text-4xl mb-4 ${primary ? "opacity-80 group-hover:opacity-100 transition-opacity" : "text-primary opacity-80"}`}
-      >
+      <span className={`material-symbols-outlined text-2xl mb-2 ${primary ? "opacity-80 group-hover:opacity-100 transition-opacity" : "text-primary opacity-80"}`}>
         {icon}
       </span>
-      <h3 className="text-xl font-bold tracking-tight mb-2 font-headline">{title}</h3>
-      <p className={primary ? "text-sm text-primary-fixed-dim leading-relaxed" : "text-sm text-on-surface-variant leading-relaxed"}>{text}</p>
+      <h3 className="text-base font-bold tracking-tight mb-1.5 font-headline">{title}</h3>
+      <p className={primary ? "text-xs text-primary-fixed-dim leading-relaxed" : "text-xs text-on-surface-variant leading-relaxed"}>{text}</p>
     </>
   );
 
@@ -194,12 +211,12 @@ function ExpeditedCard({ icon, title, text, to, primary }) {
 
 function ManagementCard({ icon, title, text, to }) {
   const className =
-    "group flex flex-col items-start p-8 rounded-2xl bg-surface-container-lowest border border-outline-variant/10 dark:border-slate-700/40 text-on-surface text-left transition-all hover:bg-surface-bright hover:shadow-lg active:scale-95 w-full";
+    "group flex flex-col items-start p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/10 dark:border-slate-700/40 text-on-surface text-left transition-all hover:bg-surface-bright hover:shadow-lg active:scale-95 w-full";
   const inner = (
     <>
-      <span className="material-symbols-outlined text-4xl mb-4 text-primary opacity-80">{icon}</span>
-      <h3 className="text-xl font-bold tracking-tight mb-2 font-headline">{title}</h3>
-      <p className="text-sm text-on-surface-variant leading-relaxed">{text}</p>
+      <span className="material-symbols-outlined text-3xl mb-3 text-primary opacity-80">{icon}</span>
+      <h3 className="text-lg font-bold tracking-tight mb-1.5 font-headline">{title}</h3>
+      <p className="text-xs text-on-surface-variant leading-relaxed">{text}</p>
     </>
   );
   if (to) {
@@ -223,20 +240,48 @@ export default function AdminDashboard() {
   const [velocityBars, setVelocityBars] = useState(() => chartBars.map(() => ({ pct: 0 })));
   const [stockShare, setStockShare] = useState({ totalUnits: 0, primaryPct: 0, secondaryPct: 0, primaryLabel: "—", secondaryLabel: "—" });
   const [lowStockAlert, setLowStockAlert] = useState(null);
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const navigate = useNavigate();
-  const { logout, role, profile } = useAuth();
+  const { logout, role, profile, user } = useAuth();
   const dropdownRef = useRef(null);
 
   const expeditedForRole = expeditedOperations.filter((op) => canAccessPath(role, op.to));
   const managementForRole = managementControl.filter((item) => {
+    if (item.to === "/settings") return canManageUsers(role);
     if (item.to) return canAccessPath(role, item.to);
-    return canShowReportsCard(role);
+    return false;
   });
   const cardsForRole = cards.filter((card) => canSeeOverviewCard(role, card.key));
+  const quickActions = [
+    ...expeditedForRole.map((item) => ({
+      title: item.title,
+      to: item.to,
+      icon: item.icon,
+    })),
+    ...managementForRole.map((item) => ({
+      title: item.title,
+      to: item.navTo || item.to,
+      icon: item.icon,
+    })),
+  ];
+  const canCreateInventoryItems = canAccessPath(role, "/bom");
+  if (canCreateInventoryItems) {
+    quickActions.splice(5, 0, {
+      title: "Create Inventory Items",
+      to: "/bom",
+      icon: "add_box",
+    });
+  }
+  const visibleQuickActions = quickActions.slice(0, 12);
+  const topQuickActions = visibleQuickActions.slice(0, 6);
+  const bottomQuickActions = visibleQuickActions.slice(6);
+  const quickActionCardClass =
+    "group relative flex h-[112px] w-full flex-col items-center justify-center overflow-hidden rounded-[1.15rem] border border-slate-200/75 bg-white px-3 py-3 text-center shadow-[0_6px_14px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-[0_12px_24px_rgba(59,130,246,0.10)]";
+  const canReviewApprovals = normalizeRole(role) === "Admin" || normalizeRole(role) === "Management";
 
   const handleLogout = async () => {
     await logout();
-    navigate("/login");
+    navigate("/");
   };
 
   // Close dropdown when clicking outside
@@ -247,9 +292,9 @@ export default function AdminDashboard() {
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
 
@@ -270,17 +315,23 @@ export default function AdminDashboard() {
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         const tasks = [];
 
+        // Use GET + limit(0) instead of HEAD — avoids PostgREST/RLS edge cases and heavy Prefer paths.
         if (keys.includes("total")) {
           tasks.push(
-            supabase.from("inventory_items").select("*", { count: "exact", head: true }).then((res) => ({ key: "total", res }))
+            supabase
+              .from("inventory_items")
+              .select("id", { count: "exact", head: false })
+              .limit(0)
+              .then((res) => ({ key: "total", res }))
           );
         }
         if (keys.includes("low")) {
           tasks.push(
             supabase
               .from("inventory_items")
-              .select("*", { count: "exact", head: true })
+              .select("id", { count: "exact", head: false })
               .lte("current_stock", 20)
+              .limit(0)
               .then((res) => ({ key: "low", res }))
           );
         }
@@ -288,9 +339,10 @@ export default function AdminDashboard() {
           tasks.push(
             supabase
               .from("stock_movements")
-              .select("*", { count: "exact", head: true })
+              .select("id", { count: "exact", head: false })
               .eq("movement_type", "in")
               .gte("created_at", since)
+              .limit(0)
               .then((res) => ({ key: "recv", res }))
           );
         }
@@ -298,9 +350,10 @@ export default function AdminDashboard() {
           tasks.push(
             supabase
               .from("stock_movements")
-              .select("*", { count: "exact", head: true })
+              .select("id", { count: "exact", head: false })
               .eq("movement_type", "out")
               .gte("created_at", since)
+              .limit(0)
               .then((res) => ({ key: "dispatch", res }))
           );
         }
@@ -318,24 +371,26 @@ export default function AdminDashboard() {
           tasks.push(
             supabase
               .from("purchase_orders")
-              .select("*", { count: "exact", head: true })
-              .in("status", ["draft", "sent", "confirmed"])
+              .select("id", { count: "exact", head: false })
+              .eq("status", "sent")
+              .limit(0)
               .then((res) => ({ key: "pending", res }))
           );
         }
 
+        const taskResults = await Promise.all(tasks);
+
+        // Avoid embedding profiles(...) — non-admin RLS only allows own profile row, which breaks PostgREST embeds (500).
         const ledgerPromise = canSeeLedger(r)
           ? supabase
               .from("stock_movements")
-              .select(
-                "id,movement_type,quantity,created_at,item_id,inventory_items(sku,name),profiles(first_name,last_name,email)"
-              )
+              .select("id,movement_type,quantity,created_at,item_id,created_by,inventory_items(sku,name)")
               .order("created_at", { ascending: false })
               .limit(8)
           : Promise.resolve({ data: null, error: null });
 
         const hubAggPromise = canSeeStockShare(r)
-          ? supabase.from("inventory_items").select("location, current_stock").not("location", "is", null).limit(4000)
+          ? supabase.from("inventory_items").select("location, current_stock").not("location", "is", null).limit(800)
           : Promise.resolve({ data: null, error: null });
 
         const velocityPromise =
@@ -344,7 +399,7 @@ export default function AdminDashboard() {
                 .from("stock_movements")
                 .select("created_at")
                 .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-                .limit(5000)
+                .limit(800)
             : Promise.resolve({ data: null, error: null });
 
         const lowStockPromise = canSeeActiveAlerts(r)
@@ -356,8 +411,7 @@ export default function AdminDashboard() {
               .limit(1)
           : Promise.resolve({ data: null, error: null });
 
-        const [taskResults, ledgerRes, hubRes, velRes, lowRes] = await Promise.all([
-          Promise.all(tasks),
+        const [ledgerRes, hubRes, velRes, lowRes] = await Promise.all([
           ledgerPromise,
           hubAggPromise,
           velocityPromise,
@@ -378,12 +432,18 @@ export default function AdminDashboard() {
         for (const item of taskResults) {
           if (item.key === "hubs") {
             const { data, error } = item.res;
+            if (error) {
+              console.error(`Dashboard metric ${item.key}:`, error.message ?? error);
+            }
             if (!error && data?.length) {
               counts.hubs = new Set(data.map((row) => row.location).filter(Boolean)).size;
             }
             continue;
           }
           const { count, error } = item.res;
+          if (error) {
+            console.error(`Dashboard metric ${item.key}:`, error.message ?? error);
+          }
           if (!error && count != null) {
             counts[item.key] = count;
           }
@@ -403,6 +463,17 @@ export default function AdminDashboard() {
         );
 
         if (!ledgerRes.error && ledgerRes.data?.length) {
+          const creatorIds = [...new Set(ledgerRes.data.map((entry) => entry.created_by).filter(Boolean))];
+          let profileById = new Map();
+          if (creatorIds.length > 0) {
+            const profileRes = await supabase
+              .from("profiles")
+              .select("id,first_name,last_name,email,avatar_url")
+              .in("id", creatorIds);
+            if (!profileRes.error && profileRes.data?.length) {
+              profileById = new Map(profileRes.data.map((p) => [p.id, p]));
+            }
+          }
           const mappedLogs = ledgerRes.data.map((entry) => {
             const action = movementActionLabel(entry.movement_type);
             const qty =
@@ -417,16 +488,16 @@ export default function AdminDashboard() {
             if (entry.created_at) {
               const d = new Date(entry.created_at);
               if (!Number.isNaN(d.getTime())) {
-                timeLabel = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                timeLabel = d.toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
               }
             }
-            const prof = entry.profiles;
-            const profileRow = Array.isArray(prof) ? prof[0] : prof;
             const inv = entry.inventory_items;
             const invRow = Array.isArray(inv) ? inv[0] : inv;
+            const actor = entry.created_by ? profileById.get(entry.created_by) : null;
             return {
               id: entry.id,
-              user: profileDisplayName(profileRow),
+              user: profileLabelFromRow(actor),
+              avatar_url: actor?.avatar_url ?? null,
               action,
               actionClass,
               sku: invRow?.sku || invRow?.name || "—",
@@ -508,7 +579,71 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [role]);
+  }, [role, user?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canReviewApprovals) {
+      setPendingApprovalsCount(0);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const loadPendingApprovals = async () => {
+      try {
+        const [receiveRes, disposeRes, transferRes, poRes, deliveryRes, countRes] = await Promise.all([
+          supabase
+            .from("receive_transactions")
+            .select("id", { count: "exact", head: false })
+            .eq("status", "pending_approval")
+            .limit(0),
+          supabase
+            .from("stock_adjustments")
+            .select("id", { count: "exact", head: false })
+            .eq("status", "pending")
+            .limit(0),
+          supabase
+            .from("stock_transfers")
+            .select("id", { count: "exact", head: false })
+            .eq("status", "pending")
+            .limit(0),
+          supabase
+            .from("purchase_orders")
+            .select("id", { count: "exact", head: false })
+            .eq("status", "sent")
+            .limit(0),
+          supabase
+            .from("delivery_requests")
+            .select("id", { count: "exact", head: false })
+            .eq("status", "pending_approval")
+            .limit(0),
+          supabase
+            .from("stock_counts")
+            .select("id", { count: "exact", head: false })
+            .in("status", ["completed", "discrepancies_found"])
+            .limit(0),
+        ]);
+
+        const total =
+          Number(receiveRes.count || 0) +
+          Number(disposeRes.count || 0) +
+          Number(transferRes.count || 0) +
+          Number(poRes.count || 0) +
+          Number(deliveryRes.count || 0) +
+          Number(countRes.count || 0);
+
+        if (!cancelled) setPendingApprovalsCount(total);
+      } catch {
+        if (!cancelled) setPendingApprovalsCount(0);
+      }
+    };
+    loadPendingApprovals();
+    const timer = window.setInterval(loadPendingApprovals, 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [canReviewApprovals]);
 
   return (
     <div className="bg-surface text-on-surface selection:bg-primary-fixed selection:text-on-primary-fixed min-h-screen">
@@ -519,48 +654,17 @@ export default function AdminDashboard() {
               to="/"
               className="text-xl font-bold tracking-tighter text-slate-900 dark:text-white font-headline shrink-0 hover:opacity-90 transition-opacity"
             >
-              The Fluid Curator
+              Inventory
             </Link>
-            <nav className="hidden md:flex gap-6 items-center flex-wrap">
-              <span className="font-manrope font-semibold tracking-tight text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 pb-1 cursor-default">
-                Dashboard
-              </span>
-              {canAccessPath(role, "/inventory") && (
-                <Link
-                  to="/inventory"
-                  className="font-manrope font-semibold tracking-tight text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-                >
-                  Inventory
-                </Link>
-              )}
-              {canShowReportsCard(role) && (
-                <span className="font-manrope font-semibold tracking-tight text-slate-400 dark:text-slate-500 cursor-default">
-                  Reports
-                </span>
-              )}
-              <span className="font-manrope font-semibold tracking-tight text-slate-400 dark:text-slate-500 cursor-default">
-                Locations
-              </span>
-            </nav>
           </div>
           <div className="flex items-center gap-4 lg:gap-6 min-w-0">
-            <div className="relative hidden lg:block">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
-              <input
-                className="bg-surface-container-highest border-none rounded-full pl-10 pr-4 py-2 text-sm w-52 xl:w-64 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all outline-none"
-                placeholder="Search curated assets..."
-                type="search"
-                aria-label="Search curated assets"
-              />
-            </div>
             <div className="flex items-center gap-3">
               <NotificationBell />
-              <button
-                type="button"
-                className="p-2 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 rounded-lg transition-all active:scale-95 duration-200 text-slate-500 dark:text-slate-400"
-              >
-                <span className="material-symbols-outlined">settings</span>
-              </button>
+              {role ? (
+                <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                  {role}
+                </span>
+              ) : null}
               <div className="relative ml-2" ref={dropdownRef}>
               <button
                 onClick={() => setShowUserDropdown(!showUserDropdown)}
@@ -573,27 +677,7 @@ export default function AdminDashboard() {
 
               {/* User Dropdown Menu */}
               {showUserDropdown && (
-                <div className="absolute right-0 mt-2 w-48 bg-surface-container-lowest rounded-xl shadow-lg border border-surface-container py-2 z-50">
-                  {canManageUsers(role) && (
-                    <Link
-                      to="/users"
-                      onClick={() => setShowUserDropdown(false)}
-                      className="w-full px-4 py-2 text-left text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center gap-3"
-                    >
-                      <span className="material-symbols-outlined text-lg">admin_panel_settings</span>
-                      <span>Users</span>
-                    </Link>
-                  )}
-                  {canManageUsers(role) && (
-                    <Link
-                      to="/audit-logs"
-                      onClick={() => setShowUserDropdown(false)}
-                      className="w-full px-4 py-2 text-left text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center gap-3"
-                    >
-                      <span className="material-symbols-outlined text-lg">history</span>
-                      <span>Audit log</span>
-                    </Link>
-                  )}
+                <div className="absolute right-0 mt-2 w-56 bg-surface-container-lowest rounded-xl shadow-lg border border-surface-container py-2 z-50">
                   <button
                     onClick={handleLogout}
                     className="w-full px-4 py-2 text-left text-sm text-error hover:bg-error-container transition-colors flex items-center gap-3"
@@ -609,20 +693,91 @@ export default function AdminDashboard() {
         </div>
       </header>
 
-      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-[1440px] mx-auto space-y-10">
-        <header className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-baseline gap-3">
-            <h1 className="text-3xl font-extrabold tracking-tight text-on-surface font-headline">Dashboard</h1>
-            {role ? (
-              <span className="text-xs font-semibold uppercase tracking-wider text-primary px-2 py-1 rounded-full bg-primary/10">
-                {role}
-              </span>
-            ) : null}
-          </div>
-          <p className="text-on-surface-variant font-medium">{roleDashboardSubtitle(role)}</p>
-        </header>
+      <main className="pt-24 pb-6 px-3 sm:px-4 lg:px-5 max-w-[1440px] mx-auto space-y-6">
+        <section className="px-4 py-12 sm:px-8">
+          <header className="flex flex-col items-center text-center">
+            <h1 className="text-[2.1rem] font-extrabold tracking-tight text-on-surface font-headline">Welcome to InVentory</h1>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              Your complete inventory and operations workspace
+            </p>
+          </header>
+          {visibleQuickActions.length > 0 ? (
+            <div className="mx-auto mt-9 flex max-w-[900px] flex-col items-center gap-4">
+              <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                {topQuickActions.map((action) => (
+                  <Link
+                    key={`${action.title}-${action.to}`}
+                    to={action.to}
+                    className={quickActionCardClass}
+                  >
+                    <span className="pointer-events-none absolute inset-x-4 bottom-0 h-[2px] rounded-full bg-primary/65 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                    <span className="mb-2 flex h-9 w-9 items-center justify-center rounded-full text-primary/70 transition-all duration-200 group-hover:scale-105 group-hover:text-primary">
+                      <span className="material-symbols-outlined text-[20px]">
+                        {action.icon}
+                      </span>
+                    </span>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.11em] text-on-surface leading-4">
+                      {action.title}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+              {bottomQuickActions.length > 0 ? (
+                <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-12">
+                  {bottomQuickActions.map((action, idx) => (
+                    (() => {
+                      const centeredStarts = ["lg:col-start-2", "lg:col-start-4", "lg:col-start-6", "lg:col-start-8", "lg:col-start-10"];
+                      const colStartClass = centeredStarts[idx] || "";
+                      return (
+                    <Link
+                      key={`${action.title}-${action.to}`}
+                      to={action.to}
+                      className={`${quickActionCardClass} lg:col-span-2 ${colStartClass}`}
+                    >
+                      <span className="pointer-events-none absolute inset-x-4 bottom-0 h-[2px] rounded-full bg-primary/65 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                      <span className="mb-2 flex h-9 w-9 items-center justify-center rounded-full text-primary/70 transition-all duration-200 group-hover:scale-105 group-hover:text-primary">
+                        <span className="material-symbols-outlined text-[20px]">
+                          {action.icon}
+                        </span>
+                      </span>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.11em] text-on-surface leading-4">
+                        {action.title}
+                      </p>
+                    </Link>
+                      );
+                    })()
+                  ))}
+                </div>
+              ) : null}
+              {canReviewApprovals ? (
+                <Link
+                  to="/approvals"
+                  className="group mt-1 flex w-full max-w-[420px] items-center justify-between rounded-[1.2rem] border border-slate-200/80 bg-white px-4 py-3 text-left shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-[0_16px_30px_rgba(59,130,246,0.1)]"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <span className="material-symbols-outlined text-[18px]">approval_delegation</span>
+                    </span>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-on-surface-variant">Pending Approvals</p>
+                      <p className="text-xl font-extrabold leading-none text-on-surface">
+                        {pendingApprovalsCount} Request{pendingApprovalsCount === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-primary">View Full List</p>
+                </Link>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-8 rounded-2xl border border-outline-variant/20 bg-surface p-4 text-center text-sm text-on-surface-variant">
+              No quick actions are available for your role yet.
+            </div>
+          )}
+        </section>
 
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+        <div className="hidden">
+        <section className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {cardsForRole.length === 0 ? (
             <div className="col-span-full rounded-2xl border border-outline-variant/20 bg-surface-container-low/40 p-6 text-sm text-on-surface-variant">
               No KPI widgets are configured for your role. Contact an administrator if this is unexpected.
@@ -630,9 +785,9 @@ export default function AdminDashboard() {
           ) : null}
           {cardsForRole.map((card) =>
             card.variant === "badge" ? (
-              <div key={card.key} className="bg-surface-container-lowest p-6 rounded-xl shadow-sm shadow-on-surface/5 flex flex-col gap-4">
+              <div key={card.key} className="bg-surface-container-lowest p-3 rounded-xl shadow-sm shadow-on-surface/5 flex flex-col gap-2 min-h-[116px]">
                 <div className="flex justify-between items-start">
-                  <div className={`w-10 h-10 rounded-full ${card.iconBg} flex items-center justify-center ${card.iconClass}`}>
+                  <div className={`w-8 h-8 rounded-full ${card.iconBg} flex items-center justify-center ${card.iconClass}`}>
                     <span className="material-symbols-outlined">{card.icon}</span>
                   </div>
                   <span className="bg-tertiary text-on-tertiary px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
@@ -640,17 +795,17 @@ export default function AdminDashboard() {
                   </span>
                 </div>
                 <div>
-                  <span className={`text-4xl font-extrabold tracking-tight headline ${card.valueClass ?? ""}`}>{card.value}</span>
+                  <span className={`text-2xl font-extrabold tracking-tight headline ${card.valueClass ?? ""}`}>{card.value}</span>
                   <p className="text-xs font-semibold uppercase tracking-widest text-on-surface-variant mt-1">{card.label}</p>
                 </div>
               </div>
             ) : (
-              <div key={card.key} className="bg-surface-container-lowest p-6 rounded-xl shadow-sm shadow-on-surface/5 flex flex-col gap-4">
-                <div className={`w-10 h-10 rounded-full ${card.iconBg} flex items-center justify-center ${card.iconClass}`}>
+              <div key={card.key} className="bg-surface-container-lowest p-3 rounded-xl shadow-sm shadow-on-surface/5 flex flex-col gap-2 min-h-[116px]">
+                <div className={`w-8 h-8 rounded-full ${card.iconBg} flex items-center justify-center ${card.iconClass}`}>
                   <span className="material-symbols-outlined">{card.icon}</span>
                 </div>
                 <div>
-                  <span className={`text-4xl font-extrabold tracking-tight headline ${card.valueClass ?? ""}`}>{card.value}</span>
+                  <span className={`text-2xl font-extrabold tracking-tight headline ${card.valueClass ?? ""}`}>{card.value}</span>
                   <p className="text-xs font-semibold uppercase tracking-widest text-on-surface-variant mt-1">{card.label}</p>
                 </div>
               </div>
@@ -659,9 +814,9 @@ export default function AdminDashboard() {
         </section>
 
         {canSeeExpeditedSection(role) && expeditedForRole.length > 0 ? (
-          <section className="space-y-6">
+          <section className="space-y-4">
             <h2 className="text-lg font-bold tracking-tight text-on-surface-variant uppercase font-headline">Expedited Operations</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {expeditedForRole.map((op) => (
                 <ExpeditedCard key={op.title} icon={op.icon} title={op.title} text={op.text} to={op.to} primary={op.primary} />
               ))}
@@ -678,9 +833,9 @@ export default function AdminDashboard() {
         )}
 
         {managementForRole.length > 0 ? (
-          <section className="space-y-6">
+          <section className="space-y-4">
             <h2 className="text-lg font-bold tracking-tight text-on-surface-variant uppercase font-headline">Management &amp; Control</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {managementForRole.map((item) => (
                 <ManagementCard key={item.title} icon={item.icon} title={item.title} text={item.text} to={item.to} />
               ))}
@@ -828,11 +983,11 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface-container">
-                  {liveLedgerLogs.map((log) => (
+                  {liveLedgerLogs.length > 0 ? liveLedgerLogs.map((log) => (
                     <tr key={log.id} className="group hover:bg-surface transition-colors">
                       <td className="py-5">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-600" aria-hidden />
+                          <UserAvatarOrIcon src={log.avatar_url} alt={log.user} size="sm" />
                           <span className="text-sm font-semibold">{log.user}</span>
                         </div>
                       </td>
@@ -843,7 +998,13 @@ export default function AdminDashboard() {
                       <td className="py-5 text-sm font-bold">{log.qty}</td>
                       <td className="py-5 text-sm text-on-surface-variant">{log.time}</td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-sm text-on-surface-variant">
+                        No ledger entries found in your organization yet.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -887,36 +1048,9 @@ export default function AdminDashboard() {
           )}
         </div>
         )}
+        </div>
 
       </main>
-
-      <footer className="w-full py-12 bg-transparent">
-        <div className="flex flex-col md:flex-row justify-between items-center px-4 sm:px-6 lg:px-8 max-w-[1440px] mx-auto opacity-60">
-          <span className="font-['Inter'] text-xs uppercase tracking-widest text-slate-400 dark:text-slate-600">
-            © 2024 The Fluid Curator Inventory Systems
-          </span>
-          <div className="flex flex-wrap gap-6 md:gap-8 mt-6 md:mt-0 justify-center">
-            <a
-              className="font-['Inter'] text-xs uppercase tracking-widest text-slate-400 dark:text-slate-600 hover:text-blue-500 transition-colors opacity-80 hover:opacity-100"
-              href="#"
-            >
-              Privacy Policy
-            </a>
-            <a
-              className="font-['Inter'] text-xs uppercase tracking-widest text-slate-400 dark:text-slate-600 hover:text-blue-500 transition-colors opacity-80 hover:opacity-100"
-              href="#"
-            >
-              Terms of Service
-            </a>
-            <a
-              className="font-['Inter'] text-xs uppercase tracking-widest text-slate-400 dark:text-slate-600 hover:text-blue-500 transition-colors opacity-80 hover:opacity-100"
-              href="#"
-            >
-              Support
-            </a>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

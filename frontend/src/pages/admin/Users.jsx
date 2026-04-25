@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../contexts/AuthContext";
 import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
+import { NotificationBell } from "../../components/NotificationBell";
 
 function AddUserModal({ open, onClose, roles, onInvited }) {
   const [formData, setFormData] = useState({
@@ -201,9 +202,16 @@ function formatUpdatedAt(iso) {
   }
 }
 
+function profileDisplayName(profile) {
+  if (!profile) return "Inventory user";
+  const firstName = String(profile.first_name || "").trim();
+  const lastName = String(profile.last_name || "").trim();
+  if (firstName || lastName) return [firstName, lastName].filter(Boolean).join(" ");
+  return profile.email || "Inventory user";
+}
+
 export default function Users() {
-  const { role: currentRole, loading: authLoading } = useAuth();
-  const navigate = useNavigate();
+  const { profile, role: currentRole, loading: authLoading } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [rows, setRows] = useState([]);
@@ -286,46 +294,17 @@ export default function Users() {
 
   return (
     <div className="bg-background text-on-surface min-h-screen">
-      <header className="fixed top-0 w-full z-50 px-8 py-4 bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm shadow-blue-900/5">
-        <div className="flex justify-between items-center w-full max-w-[1920px] mx-auto">
-          <div className="flex items-center gap-8">
+      <header className="fixed top-0 z-50 w-full border-b border-white/10 bg-white/80 shadow-sm shadow-blue-900/5 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8 max-w-[1440px]">
+          <div className="flex items-center gap-6 min-w-0">
             <Link
-              to="/"
-              className="text-xl font-extrabold tracking-tighter text-slate-900 dark:text-slate-100"
+              to="/dashboard"
+              className="text-xl font-bold tracking-tighter text-slate-900 transition-opacity hover:opacity-90 font-headline"
             >
-              The Fluid Curator
+              Inventory
             </Link>
-            <nav className="hidden md:flex items-center gap-6">
-              <Link
-                className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors font-manrope tracking-tight text-sm font-semibold"
-                to="/"
-              >
-                Dashboard
-              </Link>
-              <Link
-                className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors font-manrope tracking-tight text-sm font-semibold"
-                to="/inventory"
-              >
-                Inventory
-              </Link>
-              <span className="text-blue-700 dark:text-blue-400 border-b-2 border-blue-600 font-bold font-manrope tracking-tight text-sm">
-                Users
-              </span>
-              <Link
-                className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors font-manrope tracking-tight text-sm font-semibold"
-                to="/reports"
-              >
-                Reports
-              </Link>
-              <Link
-                className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors font-manrope tracking-tight text-sm font-semibold"
-                to="/settings"
-              >
-                Settings
-              </Link>
-            </nav>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 lg:gap-6 min-w-0">
             <div className="relative group">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">
                 search
@@ -338,37 +317,38 @@ export default function Users() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <button
-              type="button"
-              onClick={() => setShowAddUserModal(true)}
-              className="bg-gradient-to-r from-primary to-primary-container text-on-primary px-6 py-2 rounded-full text-sm font-bold shadow-md hover:scale-[0.98] transition-transform active:scale-95 duration-150"
-            >
-              Add User
-            </button>
-            <div className="flex items-center gap-2 ml-4">
-              <button
-                type="button"
-                className="p-2 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 rounded-full transition-all"
-              >
-                <span className="material-symbols-outlined text-on-surface-variant">notifications</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate("/")}
-                className="w-8 h-8 rounded-full border-2 border-white shadow-sm bg-surface-container-high flex items-center justify-center text-xs font-bold text-on-surface-variant"
-              >
-                AD
-              </button>
-            </div>
+            <NotificationBell />
+            <span className="shrink-0 rounded-full border-2 border-surface-bright bg-surface-container-high p-0">
+              <UserAvatarOrIcon src={profile?.avatar_url} alt={profileDisplayName(profile)} size="md" />
+            </span>
           </div>
         </div>
       </header>
 
-      <main className="pt-28 pb-12 px-8 max-w-[1920px] mx-auto">
-        <div className="mb-10">
-          <h1 className="text-4xl font-extrabold tracking-tight text-on-surface">Users Management</h1>
-          <p className="text-on-surface-variant mt-2 text-lg">Manage system access and roles for your team (Admin only)</p>
-        </div>
+      <main className="mx-auto w-full max-w-[1600px] px-2 pb-10 pt-[4.4rem] sm:px-3 lg:px-4">
+        <section className="px-1 py-2 sm:px-2">
+          <div className="relative mx-auto w-full overflow-hidden rounded-[2rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
+            <Link
+              to="/system-settings"
+              className="absolute right-5 top-5 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full border border-outline-variant/20 bg-white/90 text-on-surface-variant shadow-sm transition-all hover:border-error/20 hover:bg-white hover:text-error"
+              aria-label="Close"
+              title="Close"
+            >
+              <span className="material-symbols-outlined text-[20px]">close</span>
+            </Link>
+            <div className="min-h-[calc(100dvh-7.2rem)]">
+              <section className="relative min-h-0 overflow-auto bg-transparent p-4 sm:p-6 lg:p-8">
+                <div className="mx-auto max-w-[1180px] space-y-6">
+                  <div className="flex items-center justify-between gap-4">
+                    <h1 className="text-3xl font-extrabold tracking-tight text-on-surface">Users Management</h1>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddUserModal(true)}
+                      className="bg-gradient-to-r from-primary to-primary-container text-on-primary px-6 py-2 rounded-full text-sm font-bold shadow-md hover:scale-[0.98] transition-transform active:scale-95 duration-150"
+                    >
+                      Add User
+                    </button>
+                  </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
           <div className="bg-surface-container-low p-6 rounded-xl">
@@ -478,29 +458,11 @@ export default function Users() {
             </span>
           </div>
         </section>
-
-        <div className="mt-12 grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-surface-container-low p-8 rounded-xl relative overflow-hidden group">
-            <div className="relative z-10">
-              <h3 className="text-xl font-bold mb-4">Team Performance &amp; Access</h3>
-              <p className="text-on-surface-variant mb-6 max-w-md">
-                Admins invite users and assign roles from your <code className="text-xs bg-surface-container-highest px-1 rounded">roles</code> table. Non-admins cannot open this page.
-              </p>
-            </div>
-            <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-primary/5 rounded-full blur-3xl group-hover:scale-110 transition-transform duration-700" />
-          </div>
-          <div className="bg-gradient-to-br from-primary to-primary-container p-8 rounded-xl text-on-primary shadow-lg flex flex-col justify-between">
-            <div>
-              <span className="material-symbols-outlined text-4xl mb-4" style={{ fontVariationSettings: "'FILL' 1" }}>
-                security
-              </span>
-              <h3 className="text-xl font-bold mb-2">Invites</h3>
-              <p className="text-primary-fixed/80 text-sm">
-                Deploy the <code className="text-xs">invite-user</code> Edge Function so “Invite user” can send email invites and set roles.
-              </p>
+                </div>
+              </section>
             </div>
           </div>
-        </div>
+        </section>
       </main>
 
       <AddUserModal

@@ -27,6 +27,8 @@ export function normalizeRole(role) {
     management: "Management",
   };
   if (aliases[lower]) return aliases[lower];
+  const caseInsensitive = CANONICAL_ROLES.find((c) => c.toLowerCase() === lower);
+  if (caseInsensitive) return caseInsensitive;
   if (CANONICAL_ROLES.includes(r)) return r;
   return r;
 }
@@ -54,11 +56,20 @@ const PATH_ROLES = {
   "/receive": ["Admin", "Warehouse Staff", "Procurement Staff"],
   "/transfer": ["Admin", "Warehouse Staff", "Production Staff"],
   "/deliver": ["Admin", "Warehouse Staff", "Production Staff"],
+  "/consume": ["Admin", "Production Staff", "Warehouse Staff"],
   "/count": ["Admin", "Warehouse Staff"],
   "/dispose": ["Admin", "Warehouse Staff"],
   "/purchase-orders": ["Admin", "Procurement Staff", "Management"],
+  "/reports": ["Admin", "Procurement Staff", "Management"],
+  "/manage-suppliers": ["Admin", "Procurement Staff"],
+  "/manage-locations": ["Admin", "Warehouse Staff"],
+  "/manage-bom": ["Admin", "Procurement Staff", "Production Staff"],
+  "/bom": ["Admin", "Procurement Staff", "Production Staff"],
   "/users": ["Admin"],
   "/audit-logs": ["Admin"],
+  "/approvals": ["Admin", "Management"],
+  "/settings": ["Admin"],
+  "/system-settings": ["Admin"],
 };
 
 /**

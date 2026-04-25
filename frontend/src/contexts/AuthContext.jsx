@@ -3,6 +3,22 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { supabase } from '../lib/supabase'
 import { normalizeRole } from '../lib/roleAccess'
 
+/** Max wait for Supabase before we unblock the UI (avoids infinite white screen on slow/504 API). */
+const PROFILE_LOAD_TIMEOUT_MS = 12000
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request timed out')), ms)
+    }),
+  ])
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 const AuthContext = createContext()
 
 export function useAuth() {
@@ -20,50 +36,75 @@ export function AuthProvider({ children }) {
       return
     }
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(
-        'id,email,first_name,last_name,avatar_url,department,location,phone,is_active,role_id,organization_id,organizations(name)'
+    let data
+    let error
+    try {
+      const res = await withTimeout(
+        supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle(),
+        PROFILE_LOAD_TIMEOUT_MS
       )
-      .eq('id', authUser.id)
-      .maybeSingle()
-
-    if (error) {
+      data = res.data
+      error = res.error
+    } catch {
       setProfile(null)
       return
     }
 
-    const orgName = data?.organizations?.name ?? null
-    let next = data ? { ...data, organization_name: orgName } : null
-    if (next && 'organizations' in next) {
-      const { organizations: _removed, ...rest } = next
-      next = rest
-    }
-    if (next?.role_id) {
-      const { data: roleRow } = await supabase
-        .from('roles')
-        .select('name')
-        .eq('id', next.role_id)
-        .maybeSingle()
-      next = { ...next, role_name: normalizeRole(roleRow?.name) ?? null }
+    if (error) {
+      console.error('profiles load failed:', error.message ?? error)
+      setProfile(null)
+      return
     }
 
-    setProfile(next)
+    if (!data) {
+      setProfile(null)
+      return
+    }
+
+    let roleName = null
+    let orgName = null
+    try {
+      const [roleRes, orgRes] = await Promise.all([
+        data.role_id
+          ? withTimeout(
+              supabase.from('roles').select('name').eq('id', data.role_id).maybeSingle(),
+              8000
+            ).catch(() => ({ data: null }))
+          : Promise.resolve({ data: null }),
+        data.organization_id
+          ? withTimeout(
+              supabase.from('organizations').select('name').eq('id', data.organization_id).maybeSingle(),
+              8000
+            ).catch(() => ({ data: null }))
+          : Promise.resolve({ data: null }),
+      ])
+      roleName = normalizeRole(roleRes.data?.name) ?? null
+      orgName = orgRes.data?.name ?? null
+    } catch {
+      // keep partial profile
+    }
+
+    setProfile({
+      ...data,
+      organization_name: orgName,
+      role_name: roleName,
+    })
   }, [])
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const authUser = session?.user ?? null
       setUser(authUser)
-      loadProfile(authUser).finally(() => setLoading(false))
-    })
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const authUser = session?.user ?? null
-      setUser(authUser)
-      loadProfile(authUser).finally(() => setLoading(false))
+      if (event === 'TOKEN_REFRESHED') {
+        return
+      }
+
+      setLoading(true)
+      // Never hang forever: unblock shell after PROFILE_LOAD_TIMEOUT_MS even if profile fetch stalls.
+      void Promise.race([loadProfile(authUser), delay(PROFILE_LOAD_TIMEOUT_MS)]).finally(() => {
+        setLoading(false)
+      })
     })
 
     return () => subscription.unsubscribe()
@@ -78,7 +119,7 @@ export function AuthProvider({ children }) {
   }
 
   const logout = async () => {
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: 'local' })
     setUser(null)
     setProfile(null)
   }
@@ -100,7 +141,17 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {loading ? (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background text-on-background px-6">
+          <span
+            className="inline-block h-9 w-9 animate-spin rounded-full border-2 border-primary border-t-transparent"
+            aria-hidden
+          />
+          <p className="text-sm font-medium text-on-surface-variant">Loading session…</p>
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   )
 }

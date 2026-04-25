@@ -1,368 +1,700 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { getErrorMessage } from "../../lib/errors";
 import { useAuth } from "../../contexts/AuthContext";
+import { NotificationBell } from "../../components/NotificationBell";
 import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
-
-function headerUserLabel(p) {
-  if (!p) return "";
-  const fn = (p.first_name || "").trim();
-  const ln = (p.last_name || "").trim();
-  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
-  return p.email || "";
-}
-
-/** @param {string | null | undefined} status */
-function statusBadgeClass(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "draft" || s === "sent") return "text-tertiary bg-tertiary-fixed";
-  if (s === "confirmed") return "text-primary bg-primary-fixed";
-  if (s === "received") return "text-secondary bg-secondary-fixed";
-  if (s === "cancelled") return "text-error bg-error-container";
-  return "text-on-surface-variant bg-surface-container-high";
-}
+import { uploadAttachment } from "../../lib/storageUpload";
 
 function formatMoney(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return "—";
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(v);
+  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 2 }).format(v);
 }
 
-function formatDate(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+function profileDisplayName(profile) {
+  if (!profile) return "Inventory user";
+  const firstName = String(profile.first_name || "").trim();
+  const lastName = String(profile.last_name || "").trim();
+  if (firstName || lastName) return [firstName, lastName].filter(Boolean).join(" ");
+  return profile.email || "Inventory user";
 }
 
-function CreatePOModal({ open, onClose, supplierOptions }) {
+function poStatusMeta(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "draft") return { label: "Draft", className: "bg-slate-100 text-slate-700" };
+  if (s === "sent") return { label: "Pending Approval", className: "bg-amber-100 text-amber-700" };
+  if (s === "confirmed") return { label: "Approved", className: "bg-emerald-100 text-emerald-700" };
+  if (s === "cancelled") return { label: "Rejected", className: "bg-rose-100 text-rose-700" };
+  return { label: status || "Unknown", className: "bg-slate-100 text-slate-700" };
+}
+
+function buildPoNotes({ location, attachmentPath, remarks }) {
+  const lines = [];
+  if (location) lines.push(`Location: ${location}`);
+  if (attachmentPath) lines.push(`Attachment: ${attachmentPath}`);
+  if (remarks) lines.push(`Remarks: ${remarks}`);
+  return lines.join("\n") || null;
+}
+
+function displayItemCode(item) {
+  const sku = String(item?.sku || "").trim();
+  const name = String(item?.name || "").trim();
+  return sku || name || "No code";
+}
+
+function supplierLabel(supplier) {
+  const name = String(supplier?.name || "").trim();
+  if (name) return name;
+  return `Supplier ${String(supplier?.id || "").slice(0, 8)}`;
+}
+
+function CreatePOPageForm({ supplierOptions, inventoryItemOptions, onCreated, createdByProfile }) {
+  const PAGE_SIZE = 12;
   const [formData, setFormData] = useState({
     supplier: "",
+    location: "",
+    referenceNo: "",
+    attachmentPath: "",
     items: [],
     expectedDate: "",
-    priority: "medium",
-    notes: ""
+    remarks: "",
   });
   const [newItem, setNewItem] = useState({
+    inventoryItemId: "",
     sku: "",
     name: "",
+    description: "",
+    unit: "",
     quantity: "",
-    unitPrice: ""
+    unitPrice: "",
   });
+  const [submittingAction, setSubmittingAction] = useState("");
+  const [attachmentMsg, setAttachmentMsg] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [itemError, setItemError] = useState("");
+  const [itemsPage, setItemsPage] = useState(1);
+  const [supplierQuery, setSupplierQuery] = useState("");
+  const [supplierMenuOpen, setSupplierMenuOpen] = useState(false);
+  const [itemQuery, setItemQuery] = useState("");
+  const [itemMenuOpen, setItemMenuOpen] = useState(false);
+  const selectedSupplier = useMemo(
+    () => (supplierOptions ?? []).find((s) => String(s.id) === String(formData.supplier)) || null,
+    [supplierOptions, formData.supplier]
+  );
+  const selectedInventoryItem = useMemo(
+    () => (inventoryItemOptions ?? []).find((item) => String(item.id) === String(newItem.inventoryItemId)) || null,
+    [inventoryItemOptions, newItem.inventoryItemId]
+  );
+
+  const filteredSuppliers = useMemo(() => {
+    const q = supplierQuery.trim().toLowerCase();
+    const selectedLabel = selectedSupplier ? supplierLabel(selectedSupplier).trim().toLowerCase() : "";
+    if (q && selectedLabel && q === selectedLabel) return supplierOptions ?? [];
+    if (!q) return supplierOptions ?? [];
+    return (supplierOptions ?? []).filter((s) => supplierLabel(s).toLowerCase().includes(q));
+  }, [supplierOptions, supplierQuery, selectedSupplier]);
+
+  const filteredInventoryItems = useMemo(() => {
+    const q = itemQuery.trim().toLowerCase();
+    const selectedCode = selectedInventoryItem ? displayItemCode(selectedInventoryItem).trim().toLowerCase() : "";
+    if (q && selectedCode && q === selectedCode) return inventoryItemOptions ?? [];
+    if (!q) return inventoryItemOptions ?? [];
+    return (inventoryItemOptions ?? []).filter((item) => {
+      const sku = String(item?.sku || "").toLowerCase();
+      const name = String(item?.name || "").toLowerCase();
+      return sku.includes(q) || name.includes(q);
+    });
+  }, [inventoryItemOptions, itemQuery, selectedInventoryItem]);
+
+  useEffect(() => {
+    const selected = (supplierOptions ?? []).find((s) => String(s.id) === String(formData.supplier));
+    setSupplierQuery(selected ? supplierLabel(selected) : "");
+  }, [formData.supplier, supplierOptions]);
+
+  useEffect(() => {
+    const selected = (inventoryItemOptions ?? []).find((item) => String(item.id) === String(newItem.inventoryItemId));
+    setItemQuery(selected ? displayItemCode(selected) : "");
+  }, [newItem.inventoryItemId, inventoryItemOptions]);
+
+  const handleInventoryItemChange = (selectedId) => {
+    const selectedItem = (inventoryItemOptions ?? []).find((item) => String(item.id) === String(selectedId));
+    if (!selectedItem) {
+      setNewItem((prev) => ({
+        ...prev,
+        inventoryItemId: "",
+        sku: "",
+        name: "",
+        description: "",
+        unit: "",
+      }));
+      return;
+    }
+    setNewItem((prev) => ({
+      ...prev,
+      inventoryItemId: String(selectedItem.id),
+      sku: String(selectedItem.sku || "").trim(),
+      name: selectedItem.name ?? "",
+      description: "",
+      unit: selectedItem.unit_of_measure ?? "unit",
+      unitPrice: prev.unitPrice || String(selectedItem.unit_cost ?? ""),
+    }));
+  };
 
   const addItem = () => {
-    if (newItem.sku && newItem.name && newItem.quantity && newItem.unitPrice) {
-      setFormData(prev => ({
-        ...prev,
-        items: [...prev.items, { ...newItem, id: Date.now() }]
-      }));
-      setNewItem({ sku: "", name: "", quantity: "", unitPrice: "" });
-    }
+    setItemError("");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const expected = formData.expectedDate ? new Date(`${formData.expectedDate}T00:00:00`) : null;
+    if (!formData.supplier) return setItemError("Supplier is required before adding items.");
+    if (!String(formData.location || "").trim()) return setItemError("Location is required before adding items.");
+    if (!expected || Number.isNaN(expected.getTime())) return setItemError("Expected delivery date is required before adding items.");
+    if (expected < today) return setItemError("Expected delivery date cannot be in the past.");
+    const qty = Number(newItem.quantity);
+    const price = Number(newItem.unitPrice);
+    if (!newItem.inventoryItemId) return setItemError("Select an item first.");
+    if (!Number.isFinite(qty) || qty <= 0) return setItemError("Quantity must be greater than 0.");
+    if (!Number.isFinite(price) || price <= 0) return setItemError("Unit cost is required and must be greater than 0.");
+    if (!String(newItem.unit || "").trim()) return setItemError("Unit is required.");
+
+    setFormData((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          ...newItem,
+          sku: String(newItem.sku || "").trim() || String(newItem.name || "").trim(),
+          id: crypto.randomUUID(),
+        },
+      ],
+    }));
+    setItemsPage(Math.max(1, Math.ceil((formData.items.length + 1) / PAGE_SIZE)));
+    setNewItem({ inventoryItemId: "", sku: "", name: "", description: "", unit: "", quantity: "", unitPrice: "" });
+    setItemQuery("");
+    setItemMenuOpen(false);
+  };
+
+  const handleManualEntryKeyDown = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addItem();
   };
 
   const removeItem = (id) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      items: prev.items.filter(item => item.id !== id)
+      items: prev.items.filter((item) => item.id !== id),
     }));
   };
 
   const calculateTotal = () => {
-    return formData.items.reduce((sum, item) => sum + (parseFloat(item.quantity) * parseFloat(item.unitPrice)), 0).toFixed(2);
+    return formData.items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0), 0);
   };
 
-  const handleSubmit = (e) => {
+  const calculateTotalQty = () => {
+    return formData.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  };
+
+  const itemPageCount = Math.max(1, Math.ceil(formData.items.length / PAGE_SIZE));
+  const pagedItems = useMemo(() => {
+    const start = (itemsPage - 1) * PAGE_SIZE;
+    return formData.items.slice(start, start + PAGE_SIZE);
+  }, [formData.items, itemsPage]);
+
+  useEffect(() => {
+    setItemsPage((prev) => Math.min(prev, itemPageCount));
+  }, [itemPageCount]);
+
+  const resetForm = () => {
+    setFormData({
+      supplier: "",
+      location: "",
+      referenceNo: "",
+      attachmentPath: "",
+      items: [],
+      expectedDate: "",
+      remarks: "",
+    });
+    setNewItem({ inventoryItemId: "", sku: "", name: "", description: "", unit: "", quantity: "", unitPrice: "" });
+    setAttachmentMsg("");
+    setSubmitError("");
+    setItemError("");
+    setItemsPage(1);
+    setSupplierQuery("");
+    setSupplierMenuOpen(false);
+    setItemQuery("");
+    setItemMenuOpen(false);
+  };
+
+  const handleAttachmentSelect = async (file) => {
+    if (!file || !createdByProfile?.id) return;
+    try {
+      const { path } = await uploadAttachment(createdByProfile.id, file, "po-docs");
+      setFormData((prev) => ({ ...prev, attachmentPath: path }));
+      setAttachmentMsg(`Uploaded: ${path}`);
+    } catch (err) {
+      setAttachmentMsg(getErrorMessage(err));
+      setFormData((prev) => ({ ...prev, attachmentPath: "" }));
+    }
+  };
+
+  const handleSubmit = async (e, submitIntent = "submit") => {
     e.preventDefault();
-    // Handle PO creation logic here
-    console.log("Creating PO:", formData);
-    onClose();
-  };
+    setSubmitError("");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const expected = formData.expectedDate ? new Date(`${formData.expectedDate}T00:00:00`) : null;
+    if (!formData.supplier) {
+      setSubmitError("Supplier is required.");
+      return;
+    }
+    if (!expected || Number.isNaN(expected.getTime())) {
+      setSubmitError("Expected delivery date is required.");
+      return;
+    }
+    if (expected < today) {
+      setSubmitError("Expected delivery date cannot be in the past.");
+      return;
+    }
+    if (formData.items.length === 0) {
+      setSubmitError("Add at least one item.");
+      return;
+    }
 
-  if (!open) return null;
+    setSubmittingAction(submitIntent);
+    try {
+      const poNumber = String(formData.referenceNo || "").trim() || `PO-${Date.now()}`;
+      const totalAmount = calculateTotal();
+      const status = submitIntent === "submit" ? "sent" : "draft";
+      const { data: poRow, error: poErr } = await supabase
+        .from("purchase_orders")
+        .insert({
+          po_number: poNumber,
+          supplier_id: formData.supplier,
+          status,
+          expected_delivery_date: formData.expectedDate,
+          total_amount: totalAmount,
+          notes: buildPoNotes({
+            location: String(formData.location || "").trim(),
+            attachmentPath: String(formData.attachmentPath || "").trim(),
+            remarks: String(formData.remarks || "").trim(),
+          }),
+          created_by: createdByProfile?.id || null,
+        })
+        .select("id,po_number,status")
+        .single();
+      if (poErr) throw poErr;
+
+      const poId = poRow?.id;
+      const rows = formData.items.map((item) => ({
+        po_id: poId,
+        item_id: item.inventoryItemId,
+        quantity_ordered: Number(item.quantity),
+        unit_price: Number(item.unitPrice),
+        notes: String(item.description || "").trim() || null,
+      }));
+      const { error: itemErr } = await supabase.from("purchase_order_items").insert(rows);
+      if (itemErr) throw itemErr;
+
+      if (onCreated) {
+        await onCreated({
+          poId,
+          poNumber: poRow?.po_number || poNumber,
+          status: poRow?.status || status,
+          itemCount: formData.items.length,
+          totalAmount,
+        });
+      }
+      resetForm();
+    } catch (err) {
+      setSubmitError(getErrorMessage(err));
+      return;
+    } finally {
+      setSubmittingAction("");
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-on-surface/30 backdrop-blur-sm">
-      <div className="bg-surface-container-lowest w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between p-6 border-b border-surface-container">
-          <div>
-            <h2 className="text-2xl font-extrabold tracking-tight text-on-surface font-headline">Create Purchase Order</h2>
-            <p className="text-sm text-on-surface-variant">Generate a new purchase order for supplier</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-surface-container-low text-on-surface hover:bg-surface-container transition-colors"
-          >
-            <span className="material-symbols-outlined">close</span>
-          </button>
+    <div className="w-full">
+      <div className="mb-1.5 flex items-center justify-between rounded-xl bg-primary px-3 py-2.5 text-white">
+        <div>
+          <h2 className="text-sm font-extrabold tracking-tight text-white font-headline">Create Purchase Order</h2>
         </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2">Supplier</label>
-              <select
-                value={formData.supplier}
-                onChange={(e) => setFormData((prev) => ({ ...prev, supplier: e.target.value }))}
-                className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all"
-                required
-              >
-                <option value="">Select Supplier</option>
-                {(supplierOptions ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+      <form onSubmit={handleSubmit} className="p-3 h-full min-h-0 flex flex-col gap-2.5 overflow-hidden">
+        <div className="mt-1 rounded-xl border border-slate-200 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.05)] flex-1 min-h-0 flex flex-col">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <h3 className="text-[9px] font-bold uppercase tracking-[0.16em] text-primary/60">Manual Input Preview Table</h3>
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+              {formData.items.length} items
+            </span>
+          </div>
+          <div className="mb-1.5 grid grid-cols-1 gap-1 md:grid-cols-4">
+            <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
+              <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Supplier</label>
+              <div className="relative">
+                <input
+                  value={supplierQuery}
+                  onChange={(e) => {
+                    setSupplierQuery(e.target.value);
+                    setSupplierMenuOpen(true);
+                    setFormData((prev) => ({ ...prev, supplier: "" }));
+                  }}
+                  onFocus={() => setSupplierMenuOpen(true)}
+                  onBlur={() => window.setTimeout(() => setSupplierMenuOpen(false), 120)}
+                  className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[11px] text-slate-900 focus:ring-1 focus:ring-primary/20"
+                  placeholder="Select supplier"
+                  required
+                />
+                <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[14px] text-slate-500">
+                  expand_more
+                </span>
+                {supplierMenuOpen ? (
+                  <div className="absolute z-20 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                    {filteredSuppliers.length ? (
+                      filteredSuppliers.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onMouseDown={() => {
+                            setFormData((prev) => ({ ...prev, supplier: String(s.id) }));
+                            setSupplierQuery(supplierLabel(s));
+                            setSupplierMenuOpen(false);
+                          }}
+                          className="w-full px-2 py-1 text-left text-[11px] text-slate-900 hover:bg-slate-100"
+                        >
+                          {supplierLabel(s)}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-2 py-1 text-[11px] text-slate-500">No suppliers available</div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2">Expected Delivery Date</label>
+            <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
+              <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Location</label>
+              <input
+                value={formData.location}
+                onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
+                className="h-5 w-full rounded-md border-none bg-white px-1.5 text-[10px] focus:ring-1 focus:ring-primary/20"
+                placeholder="Warehouse"
+              />
+            </div>
+            <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
+              <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Expected Date</label>
               <input
                 type="date"
                 value={formData.expectedDate}
-                onChange={(e) => setFormData(prev => ({ ...prev, expectedDate: e.target.value }))}
-                className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all"
+                onChange={(e) => setFormData((prev) => ({ ...prev, expectedDate: e.target.value }))}
+                min={new Date().toISOString().split("T")[0]}
+                className="h-5 w-full rounded-md border-none bg-white px-1.5 text-[10px] focus:ring-1 focus:ring-primary/20"
                 required
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2">Priority</label>
-              <select
-                value={formData.priority}
-                onChange={(e) => setFormData(prev => ({ ...prev, priority: e.target.value }))}
-                className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all"
+            <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
+              <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Created By</label>
+              <input value={profileDisplayName(createdByProfile)} readOnly className="h-5 w-full rounded-md border-none bg-white px-1.5 text-[10px] focus:ring-1 focus:ring-primary/20" />
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-slate-200">
+            <div className="h-full min-h-[260px] overflow-x-auto overflow-y-hidden">
+            <table className="w-full min-w-[920px] table-fixed text-left text-[10px]">
+              <thead className="sticky top-0 z-10 bg-slate-100">
+                <tr>
+                  <th className="w-[18%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">SKU-Code</th>
+                  <th className="w-[18%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Item Name</th>
+                  <th className="w-[18%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Item Description</th>
+                  <th className="w-[8%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">UOM</th>
+                  <th className="w-[8%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center">Quantity</th>
+                  <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Unit Cost</th>
+                  <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-right">Cost</th>
+                  <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/80 bg-white">
+                {pagedItems.map((item) => (
+                  <tr key={item.id}>
+                    <td className="truncate px-2 py-1 font-medium">{displayItemCode(item)}</td>
+                    <td className="truncate px-2 py-1">{item.name || "—"}</td>
+                    <td className="truncate px-2 py-1">{item.description || "—"}</td>
+                    <td className="px-2 py-1">{item.unit || "unit"}</td>
+                    <td className="px-2 py-1 text-center font-semibold">{item.quantity}</td>
+                    <td className="px-2 py-1">{formatMoney(item.unitPrice)}</td>
+                    <td className="px-2 py-1 text-right font-semibold">
+                      {formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0))}
+                    </td>
+                    <td className="px-2 py-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.id)}
+                        className="rounded-full p-0.5 hover:bg-slate-100"
+                        aria-label={`Remove ${item.name || "item"}`}
+                      >
+                        <span className="material-symbols-outlined text-[14px]">delete</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                <tr className="bg-slate-50/70">
+                  <td className="px-1.5 py-1">
+                    <div className="relative">
+                      <input
+                        value={itemQuery}
+                        onChange={(e) => {
+                          setItemQuery(e.target.value);
+                          setItemMenuOpen(true);
+                          handleInventoryItemChange("");
+                        }}
+                        onFocus={() => setItemMenuOpen(true)}
+                        onBlur={() => window.setTimeout(() => setItemMenuOpen(false), 120)}
+                        onKeyDown={handleManualEntryKeyDown}
+                        className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[11px] text-slate-900 focus:ring-1 focus:ring-primary/20"
+                        placeholder="Select PO/SKU..."
+                      />
+                      <span className="material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[14px] text-slate-500">
+                        expand_more
+                      </span>
+                      {itemMenuOpen ? (
+                        <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                          {filteredInventoryItems.length ? (
+                            filteredInventoryItems.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onMouseDown={() => {
+                                  setItemQuery(displayItemCode(item));
+                                  handleInventoryItemChange(String(item.id));
+                                  setItemMenuOpen(false);
+                                }}
+                                className="w-full px-2 py-1 text-left text-[11px] text-slate-900 hover:bg-slate-100"
+                              >
+                                {displayItemCode(item)}
+                              </button>
+                            ))
+                          ) : (
+                            <div className="px-2 py-1 text-[11px] text-slate-500">No inventory items available</div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input value={newItem.name} readOnly onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      value={newItem.description}
+                      onChange={(e) => setNewItem((prev) => ({ ...prev, description: e.target.value }))}
+                      onKeyDown={handleManualEntryKeyDown}
+                      className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px] focus:ring-1 focus:ring-primary/20"
+                      placeholder="Optional"
+                    />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input value={newItem.unit} readOnly onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      type="number"
+                      min="1"
+                      value={newItem.quantity}
+                      onChange={(e) => setNewItem((prev) => ({ ...prev, quantity: e.target.value }))}
+                      onKeyDown={handleManualEntryKeyDown}
+                      className="h-6 w-full rounded-md border-none bg-white px-1.5 text-center text-[10px] focus:ring-1 focus:ring-primary/20"
+                      placeholder="0"
+                      required
+                    />
+                  </td>
+                  <td className="px-1.5 py-1">
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={newItem.unitPrice}
+                      onChange={(e) => setNewItem((prev) => ({ ...prev, unitPrice: e.target.value }))}
+                      onKeyDown={handleManualEntryKeyDown}
+                      className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px] focus:ring-1 focus:ring-primary/20"
+                      placeholder="0.00"
+                      required
+                    />
+                  </td>
+                  <td className="px-1.5 py-1 text-right font-semibold">
+                    {formatMoney(Number(newItem.quantity || 0) * Number(newItem.unitPrice || 0))}
+                  </td>
+                  <td className="px-1.5 py-1 text-center text-[9px] font-semibold text-primary/80">Enter</td>
+                </tr>
+                {Array.from({ length: Math.max(0, PAGE_SIZE - pagedItems.length - 1) }).map((_, idx) => (
+                  <tr key={`po-empty-row-${idx}`} className="bg-white">
+                    <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                    <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                    <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                    <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                    <td className="px-2 py-1 text-center text-[10px] text-slate-300">—</td>
+                    <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                    <td className="px-2 py-1 text-right text-[10px] text-slate-300">—</td>
+                    <td className="px-2 py-1"></td>
+                  </tr>
+                ))}
+              </tbody>
+              {formData.items.length > 0 ? (
+                <tfoot>
+                    <tr className="sticky bottom-0 z-10 bg-slate-700 text-white">
+                    <td className="px-2 py-1.5 text-[10px] font-semibold" colSpan={4}>
+                      Totals
+                    </td>
+                    <td className="px-2 py-1.5 text-center font-semibold">{calculateTotalQty()}</td>
+                    <td className="px-2 py-1.5"></td>
+                    <td className="px-2 py-1.5 text-right font-semibold">{formatMoney(calculateTotal())}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, items: [] }))}
+                        className="rounded-md bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold text-white hover:bg-white/25"
+                      >
+                        Clear
+                      </button>
+                    </td>
+                  </tr>
+                </tfoot>
+              ) : null}
+            </table>
+            </div>
+          </div>
+          {itemError ? <p className="mt-1 text-[10px] font-medium text-red-600">{itemError}</p> : null}
+          <div className="mt-1 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-on-surface-variant">
+                Total Quantity: <span className="font-semibold text-on-surface">{calculateTotalQty()} units</span>
+              </span>
+              {formData.items.length > PAGE_SIZE ? (
+                <div className="flex items-center gap-1 text-[9px]">
+                  <button
+                    type="button"
+                    onClick={() => setItemsPage((p) => Math.max(1, p - 1))}
+                    disabled={itemsPage <= 1}
+                    className="h-5 rounded-md bg-slate-100 px-1.5 font-semibold text-slate-700 disabled:opacity-40"
+                  >
+                    Prev
+                  </button>
+                  <span className="text-on-surface-variant">
+                    Page {itemsPage} of {itemPageCount}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setItemsPage((p) => Math.min(itemPageCount, p + 1))}
+                    disabled={itemsPage >= itemPageCount}
+                    className="h-5 rounded-md bg-slate-100 px-1.5 font-semibold text-slate-700 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Reference No</label>
+              <input
+                value={formData.referenceNo}
+                onChange={(e) => setFormData((prev) => ({ ...prev, referenceNo: e.target.value }))}
+                className="h-5 rounded-md border-none bg-slate-100 px-1.5 text-[9px]"
+                placeholder="Auto if empty"
+              />
+              <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Attachment</label>
+              <input
+                className="h-5 rounded-md border-none bg-slate-100 px-1.5 text-[9px]"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,image/jpeg,image/png,application/pdf"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleAttachmentSelect(file);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={(e) => void handleSubmit(e, "submit")}
+                disabled={Boolean(submittingAction) || formData.items.length === 0}
+                className="h-6 rounded-full bg-primary px-2.5 text-[9px] font-bold text-white disabled:opacity-45"
               >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
+                {submittingAction === "submit" ? "Submitting..." : `Submit for Approval (${formData.items.length})`}
+              </button>
             </div>
           </div>
+          {attachmentMsg ? <p className="mt-1 text-[10px] text-on-surface-variant">{attachmentMsg}</p> : null}
+        </div>
 
-          <div className="mb-6">
-            <h3 className="text-lg font-bold text-on-surface mb-4">Order Items</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-              <input
-                type="text"
-                placeholder="SKU"
-                value={newItem.sku}
-                onChange={(e) => setNewItem(prev => ({ ...prev, sku: e.target.value }))}
-                className="bg-surface-container-highest border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all text-sm"
-              />
-              <input
-                type="text"
-                placeholder="Item Name"
-                value={newItem.name}
-                onChange={(e) => setNewItem(prev => ({ ...prev, name: e.target.value }))}
-                className="bg-surface-container-highest border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all text-sm"
-              />
-              <input
-                type="number"
-                placeholder="Quantity"
-                value={newItem.quantity}
-                onChange={(e) => setNewItem(prev => ({ ...prev, quantity: e.target.value }))}
-                className="bg-surface-container-highest border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all text-sm"
-              />
-              <input
-                type="number"
-                placeholder="Unit Price"
-                value={newItem.unitPrice}
-                onChange={(e) => setNewItem(prev => ({ ...prev, unitPrice: e.target.value }))}
-                className="bg-surface-container-highest border-none rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all text-sm"
-              />
-            </div>
-            
-            <button
-              type="button"
-              onClick={addItem}
-              className="px-4 py-2 bg-primary text-on-primary rounded-xl font-semibold hover:bg-primary-container transition-all text-sm mb-4"
-            >
-              Add Item
-            </button>
+        <div>
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">Remarks</label>
+          <textarea
+            value={formData.remarks}
+            onChange={(e) => setFormData((prev) => ({ ...prev, remarks: e.target.value }))}
+            placeholder="Additional notes or instructions..."
+            rows={1}
+            className="w-full rounded-lg border-none bg-surface-container-highest px-3 py-2 text-xs transition-all resize-none focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
 
-            {formData.items.length > 0 && (
-              <div className="bg-surface-container rounded-xl p-4">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
-                      <th className="pb-2">SKU</th>
-                      <th className="pb-2">Item</th>
-                      <th className="pb-2">Qty</th>
-                      <th className="pb-2">Unit Price</th>
-                      <th className="pb-2">Total</th>
-                      <th className="pb-2 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-surface-container-high">
-                    {formData.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="py-2 text-sm">{item.sku}</td>
-                        <td className="py-2 text-sm">{item.name}</td>
-                        <td className="py-2 text-sm">{item.quantity}</td>
-                        <td className="py-2 text-sm">${item.unitPrice}</td>
-                        <td className="py-2 text-sm font-semibold">${(parseFloat(item.quantity) * parseFloat(item.unitPrice)).toFixed(2)}</td>
-                        <td className="py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => removeItem(item.id)}
-                            className="p-1 text-error hover:bg-error-container rounded transition-all"
-                          >
-                            <span className="material-symbols-outlined text-sm">delete</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td colSpan="4" className="pt-3 text-sm font-semibold text-on-surface-variant">Total:</td>
-                      <td className="pt-3 text-lg font-bold text-on-surface">${calculateTotal()}</td>
-                      <td></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
+        {submitError ? (
+          <div className="rounded-xl border border-error/30 bg-error-container/30 px-3 py-2 text-xs text-on-surface">
+            {submitError}
           </div>
-
-          <div className="mb-6">
-            <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2">Notes</label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              placeholder="Additional notes or instructions..."
-              rows={3}
-              className="w-full bg-surface-container-highest border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all resize-none"
-            />
-          </div>
-
-          <div className="flex gap-3 justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-3 bg-surface-container text-on-surface rounded-xl font-semibold hover:bg-surface-container-high transition-all"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-3 bg-gradient-to-r from-primary to-primary-container text-on-primary rounded-xl font-semibold shadow-lg shadow-primary/10 hover:shadow-xl transition-all"
-            >
-              Create Purchase Order
-            </button>
-          </div>
-        </form>
-      </div>
+        ) : null}
+      </form>
     </div>
   );
 }
 
 export default function PurchaseOrders() {
-  const { profile } = useAuth();
-  const [activeTab, setActiveTab] = useState("orders");
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [_selectedPO, setSelectedPO] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { profile, role } = useAuth();
+  const [poSuccess, setPoSuccess] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [poRows, setPoRows] = useState([]);
   const [supplierRows, setSupplierRows] = useState([]);
-  const [stats, setStats] = useState({
-    total: 0,
-    thisMonth: 0,
-    pending: 0,
-    inTransit: 0,
-    totalValue: 0,
-  });
+  const [inventoryItemOptions, setInventoryItemOptions] = useState([]);
+  const [poRows, setPoRows] = useState([]);
+
+  useEffect(() => {
+    if (searchParams.get("create") !== "1") return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("create");
+      return next;
+    }, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError("");
-    const startMonth = new Date();
-    startMonth.setDate(1);
-    startMonth.setHours(0, 0, 0, 0);
-    const startMonthIso = startMonth.toISOString();
-
     try {
-      const [
-        poRes,
-        totalHead,
-        pendingHead,
-        transitHead,
-        amountsRes,
-        monthRes,
-        supRes,
-        poMetaRes,
-      ] = await Promise.all([
-        supabase
-          .from("purchase_orders")
-          .select(
-            `
-            id,
-            po_number,
-            status,
-            priority,
-            total_amount,
-            created_at,
-            expected_delivery_date,
-            suppliers ( name ),
-            purchase_order_items ( count )
-          `
-          )
-          .order("created_at", { ascending: false })
-          .limit(200),
-        supabase.from("purchase_orders").select("*", { count: "exact", head: true }),
-        supabase
-          .from("purchase_orders")
-          .select("*", { count: "exact", head: true })
-          .in("status", ["draft", "sent"]),
-        supabase.from("purchase_orders").select("*", { count: "exact", head: true }).eq("status", "confirmed"),
-        supabase.from("purchase_orders").select("total_amount"),
-        supabase.from("purchase_orders").select("id", { count: "exact", head: true }).gte("created_at", startMonthIso),
+      const [supRes, inventoryRes, poRes] = await Promise.all([
         supabase.from("suppliers").select("id, name, email, phone").order("name"),
-        supabase.from("purchase_orders").select("supplier_id, created_at"),
+        supabase
+          .from("inventory_items")
+          .select("id, sku, name, unit_cost, unit_of_measure")
+          .neq("is_active", false)
+          .order("name")
+          .limit(500),
+        supabase
+          .from("purchase_orders")
+          .select("id,po_number,status,created_at,supplier_id,expected_delivery_date,total_amount,suppliers(name)")
+          .order("created_at", { ascending: false })
+          .limit(40),
       ]);
-
-      if (poRes.error) throw poRes.error;
       if (supRes.error) throw supRes.error;
-
+      if (inventoryRes.error) throw inventoryRes.error;
+      if (poRes.error) throw poRes.error;
+      setSupplierRows(supRes.data ?? []);
+      setInventoryItemOptions(inventoryRes.data ?? []);
       setPoRows(poRes.data ?? []);
-
-      const totalValue =
-        amountsRes.data?.reduce((sum, row) => sum + Number(row.total_amount ?? 0), 0) ?? 0;
-
-      setStats({
-        total: totalHead.count ?? 0,
-        thisMonth: monthRes.count ?? 0,
-        pending: pendingHead.error ? 0 : pendingHead.count ?? 0,
-        inTransit: transitHead.error ? 0 : transitHead.count ?? 0,
-        totalValue,
-      });
-
-      const suppliersList = supRes.data ?? [];
-      const meta = poMetaRes.data ?? [];
-      const poCountBySupplier = new Map();
-      const lastOrderBySupplier = new Map();
-      for (const row of meta) {
-        const sid = row.supplier_id;
-        if (!sid) continue;
-        poCountBySupplier.set(sid, (poCountBySupplier.get(sid) ?? 0) + 1);
-        const cur = lastOrderBySupplier.get(sid);
-        const t = row.created_at ? new Date(row.created_at).getTime() : 0;
-        if (!cur || t > cur) lastOrderBySupplier.set(sid, t);
-      }
-      setSupplierRows(
-        suppliersList.map((s) => ({
-          ...s,
-          poCount: poCountBySupplier.get(s.id) ?? 0,
-          lastOrder: lastOrderBySupplier.get(s.id)
-            ? new Date(lastOrderBySupplier.get(s.id)).toISOString().slice(0, 10)
-            : "—",
-        }))
-      );
     } catch (e) {
       setLoadError(getErrorMessage(e));
-      setPoRows([]);
       setSupplierRows([]);
+      setInventoryItemOptions([]);
+      setPoRows([]);
     } finally {
       setLoading(false);
     }
@@ -372,330 +704,108 @@ export default function PurchaseOrders() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!poSuccess) return undefined;
+    const t = window.setTimeout(() => setPoSuccess(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [poSuccess]);
+
+  const supplierOptions = useMemo(
+    () => supplierRows.map((s) => ({ id: s.id, name: s.name })),
+    [supplierRows]
+  );
+
   return (
-    <div className="bg-surface text-on-surface antialiased min-h-screen pb-20 md:pb-0">
-      <header className="fixed top-0 w-full z-50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl shadow-sm font-['Manrope'] antialiased tracking-tight">
-        <div className="flex justify-between items-center h-16 px-4 md:px-8 max-w-[1920px] mx-auto">
-          <div className="flex items-center gap-6 lg:gap-8 min-w-0">
+    <div className="min-h-dvh overflow-hidden bg-surface text-on-surface selection:bg-primary-fixed selection:text-on-primary-fixed pb-0">
+      <header className="fixed top-0 z-50 w-full border-b border-white/10 bg-white/80 shadow-sm shadow-blue-900/5 backdrop-blur-xl dark:bg-slate-900/80">
+        <div className="mx-auto flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8 max-w-[1440px]">
+          <div className="flex items-center gap-6 min-w-0">
             <Link
-              to="/"
-              className="text-lg font-extrabold tracking-tighter text-slate-900 dark:text-white shrink-0 hover:opacity-90 transition-opacity"
+              to="/dashboard"
+              className="text-xl font-bold tracking-tighter text-slate-900 transition-opacity hover:opacity-90 dark:text-white font-headline"
             >
-              The Fluid Curator
+              Inventory
             </Link>
-            <nav className="hidden md:flex items-center gap-6">
-              <a className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors font-semibold" href="#">
-                Dashboard
-              </a>
-              <a className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors font-semibold" href="#">
-                Inventory
-              </a>
-              <span className="text-blue-700 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 pb-1 cursor-default font-semibold">
-                Purchase Orders
-              </span>
-              <a className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors font-semibold" href="#">
-                Suppliers
-              </a>
-              <a className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors font-semibold" href="#">
-                Reports
-              </a>
-            </nav>
           </div>
-          <div className="flex items-center gap-3 md:gap-4 shrink-0">
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex bg-gradient-to-r from-primary to-primary-container text-on-primary px-4 md:px-6 py-2 rounded-full font-semibold active:scale-95 transition-all text-sm shrink-0"
-            >
-              Create PO
-            </button>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="p-2 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 rounded-lg transition-all text-on-surface-variant active:scale-95"
-              >
-                <span className="material-symbols-outlined">notifications</span>
-              </button>
-              <button
-                type="button"
-                className="p-2 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 rounded-lg transition-all text-on-surface-variant active:scale-95"
-              >
-                <span className="material-symbols-outlined">settings</span>
-              </button>
-            </div>
-            <UserAvatarOrIcon
-              src={profile?.avatar_url}
-              alt={headerUserLabel(profile)}
-              size="md"
-              className="border border-outline-variant"
-            />
+          <div className="flex items-center gap-3 sm:gap-4 lg:gap-6 min-w-0">
+            <NotificationBell />
+            {role ? (
+              <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                {role}
+              </span>
+            ) : null}
+            <span className="shrink-0 rounded-full border-2 border-surface-bright bg-surface-container-high p-0">
+              <UserAvatarOrIcon src={profile?.avatar_url} alt={profileDisplayName(profile)} size="md" />
+            </span>
           </div>
         </div>
       </header>
 
-      <main className="pt-24 pb-20 md:pb-8 px-4 md:px-8 max-w-[1920px] mx-auto">
-        <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div>
-            <h1 className="font-headline text-3xl font-extrabold tracking-tight text-on-surface">Purchase Orders</h1>
-            <p className="text-on-surface-variant mt-1">Manage supplier orders and track inventory procurement</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative group w-full md:w-auto">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-lg pointer-events-none">
-                search
-              </span>
-              <input
-                className="pl-10 pr-4 py-2.5 bg-surface-container-highest border-none rounded-xl focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all w-full md:w-64 text-sm"
-                placeholder="Search POs..."
-                type="search"
-                aria-label="Search purchase orders"
+      <main className="mx-auto w-full max-w-[1500px] px-2 pb-4 pt-[4.2rem] sm:px-3 lg:px-4">
+        <section className="relative rounded-2xl border border-outline-variant/20 bg-white p-2 sm:p-3">
+          <Link
+            to="/dashboard"
+            className="absolute right-3 top-[0.85rem] z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition-all hover:bg-white/20"
+            aria-label="Close"
+            title="Close"
+          >
+            <span className="material-symbols-outlined text-[16px]">close</span>
+          </Link>
+          {loadError ? (
+            <div className="mb-3 rounded-xl border border-error/30 bg-error-container/30 px-4 py-3 text-sm text-on-surface">
+              {loadError}
+            </div>
+          ) : null}
+          {loading ? (
+            <div className="rounded-xl border border-outline-variant/15 bg-white/80 px-4 py-3 text-sm text-on-surface-variant">
+              Loading suppliers and items...
+            </div>
+          ) : (
+            <div className="h-full min-h-0 overflow-hidden">
+              <CreatePOPageForm
+                supplierOptions={supplierOptions}
+                inventoryItemOptions={inventoryItemOptions}
+                createdByProfile={profile}
+                onCreated={async (created) => {
+                  await loadData();
+                  if (created?.poNumber) setPoSuccess(created);
+                }}
               />
             </div>
-            <div className="relative">
-              <button
-                type="button"
-                className="flex items-center gap-2 px-4 py-2.5 bg-surface-container-low text-on-surface-variant rounded-xl hover:bg-surface-container-high transition-colors text-sm w-full md:w-auto justify-between md:justify-start"
-              >
-                <span>Status: All</span>
-                <span className="material-symbols-outlined text-sm">expand_more</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-1 mb-8 bg-surface-container-highest p-1 rounded-xl w-fit">
-          <button
-            onClick={() => setActiveTab("orders")}
-            className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-              activeTab === "orders"
-                ? "bg-surface text-on-surface shadow-sm"
-                : "text-on-surface-variant hover:text-on-surface"
-            }`}
-          >
-            Purchase Orders
-          </button>
-          <button
-            onClick={() => setActiveTab("suppliers")}
-            className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-              activeTab === "suppliers"
-                ? "bg-surface text-on-surface shadow-sm"
-                : "text-on-surface-variant hover:text-on-surface"
-            }`}
-          >
-            Suppliers
-          </button>
-        </div>
-
-        {loadError ? (
-          <div className="mb-6 rounded-xl border border-error/30 bg-error-container/30 px-4 py-3 text-sm text-on-surface">
-            {loadError}
-          </div>
-        ) : null}
-
-        {activeTab === "orders" && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-              <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
-                <span className="text-xs font-semibold text-primary uppercase tracking-widest mb-2 block">Total POs</span>
-                <div className="font-headline text-3xl font-extrabold text-on-surface">
-                  {loading ? "—" : stats.total}
-                </div>
-                <div className="mt-2 text-xs text-on-surface-variant font-medium">This month: {loading ? "—" : stats.thisMonth}</div>
-              </div>
-              <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
-                <span className="text-xs font-semibold text-tertiary uppercase tracking-widest mb-2 block">Pending</span>
-                <div className="font-headline text-3xl font-extrabold text-tertiary">{loading ? "—" : stats.pending}</div>
-                <div className="mt-2 text-xs text-tertiary font-medium">Draft or sent</div>
-              </div>
-              <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
-                <span className="text-xs font-semibold text-secondary uppercase tracking-widest mb-2 block">In Transit</span>
-                <div className="font-headline text-3xl font-extrabold text-secondary">{loading ? "—" : stats.inTransit}</div>
-                <div className="mt-2 text-xs text-on-surface-variant font-medium">Status: confirmed</div>
-              </div>
-              <div className="bg-surface-container-low dark:bg-slate-800/40 p-6 rounded-3xl">
-                <span className="text-xs font-semibold text-primary uppercase tracking-widest mb-2 block">Total Value</span>
-                <div className="font-headline text-3xl font-extrabold text-on-surface">
-                  {loading ? "—" : formatMoney(stats.totalValue)}
-                </div>
-                <div className="mt-2 text-xs text-on-surface-variant font-medium">Sum of all PO totals</div>
-              </div>
-            </div>
-
-            <div className="bg-surface-container-lowest dark:bg-slate-900/50 rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[900px]">
-                  <thead>
-                    <tr className="bg-surface-container-low/50 dark:bg-slate-800/30">
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">PO Number</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Supplier</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Items</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Total</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Order Date</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Expected</th>
-                      <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-outline-variant/5 dark:divide-slate-700/50">
-                    {loading ? (
-                      <tr>
-                        <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant text-sm">
-                          Loading purchase orders…
-                        </td>
-                      </tr>
-                    ) : poRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="px-6 py-12 text-center text-on-surface-variant text-sm">
-                          Walang purchase order sa database. Magdagdag ng suppliers at PO sa Supabase o gamitin ang Create PO (line items ay susunod pa).
-                        </td>
-                      </tr>
-                    ) : (
-                      poRows.map((po) => {
-                        const itemCount =
-                          Array.isArray(po.purchase_order_items) && po.purchase_order_items[0]?.count != null
-                            ? po.purchase_order_items[0].count
-                            : 0;
-                        const supplierName = po.suppliers?.name ?? "—";
-                        const st = (po.status || "").toLowerCase();
-                        const priorityHigh = (po.priority || "").toLowerCase() === "high";
-                        return (
-                          <tr key={po.id} className="hover:bg-surface-container/30 transition-colors group">
-                            <td className="px-6 py-4">
-                              <div className="font-semibold text-on-surface">{po.po_number ?? po.id}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="font-medium text-on-surface">{supplierName}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`px-3 py-1 text-xs font-bold rounded-full uppercase ${statusBadgeClass(st)}`}>
-                                  {st || "—"}
-                                </span>
-                                {priorityHigh ? (
-                                  <span className="px-2 py-0.5 bg-error-container text-on-error-container text-[10px] font-bold rounded-full">
-                                    High Priority
-                                  </span>
-                                ) : null}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-sm text-on-surface-variant">{itemCount}</td>
-                            <td className="px-6 py-4 font-semibold text-on-surface">{formatMoney(po.total_amount)}</td>
-                            <td className="px-6 py-4 text-sm text-on-surface-variant">{formatDate(po.created_at)}</td>
-                            <td className="px-6 py-4 text-sm text-on-surface-variant">{formatDate(po.expected_delivery_date)}</td>
-                            <td className="px-6 py-4 text-right">
-                              <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  type="button"
-                                  className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
-                                  aria-label="View PO"
-                                  onClick={() => setSelectedPO(po)}
-                                >
-                                  <span className="material-symbols-outlined">visibility</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
-                                  aria-label="Edit PO"
-                                >
-                                  <span className="material-symbols-outlined">edit</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container rounded-lg transition-all"
-                                  aria-label="Delete PO"
-                                >
-                                  <span className="material-symbols-outlined">delete</span>
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        )}
-
-        {activeTab === "suppliers" && (
-          <div className="bg-surface-container-lowest dark:bg-slate-900/50 rounded-3xl overflow-hidden shadow-sm border border-outline-variant/10">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[900px]">
-                <thead>
-                  <tr className="bg-surface-container-low/50 dark:bg-slate-800/30">
-                    <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Supplier Name</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Email</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Phone</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Total POs</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Last Order</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-outline-variant/5 dark:divide-slate-700/50">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-on-surface-variant text-sm">
-                        Loading suppliers…
-                      </td>
-                    </tr>
-                  ) : supplierRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-on-surface-variant text-sm">
-                        Walang supplier record. Magdagdag sa table na <code className="text-xs">suppliers</code> sa Supabase.
-                      </td>
-                    </tr>
-                  ) : (
-                    supplierRows.map((supplier) => (
-                    <tr key={supplier.id} className="hover:bg-surface-container/30 transition-colors group">
-                      <td className="px-6 py-4">
-                        <div className="font-semibold text-on-surface">{supplier.name}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.email ?? "—"}</td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.phone ?? "—"}</td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.poCount}</td>
-                      <td className="px-6 py-4 text-sm text-on-surface-variant">{supplier.lastOrder}</td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            type="button"
-                            className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
-                            aria-label="View Supplier"
-                          >
-                            <span className="material-symbols-outlined">visibility</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="p-2 text-on-surface-variant hover:text-primary hover:bg-primary-fixed rounded-lg transition-all"
-                            aria-label="Edit Supplier"
-                          >
-                            <span className="material-symbols-outlined">edit</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container rounded-lg transition-all"
-                            aria-label="Delete Supplier"
-                          >
-                            <span className="material-symbols-outlined">delete</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+          )}
+        </section>
       </main>
 
-      <CreatePOModal
-        open={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        supplierOptions={supplierRows.map((s) => ({ id: s.id, name: s.name }))}
-      />
+      {poSuccess ? (
+        <div className="fixed bottom-6 left-1/2 z-[120] w-[min(100%-2rem,560px)] -translate-x-1/2 pointer-events-auto">
+          <div className="flex items-start gap-3 rounded-3xl border border-green-200/80 bg-white/95 p-4 pr-3 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.2)] backdrop-blur-xl">
+            <div className="shrink-0 rounded-2xl bg-green-50 p-2">
+              <span className="material-symbols-outlined text-2xl text-green-700">check_circle</span>
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="font-headline text-sm font-bold text-on-surface">
+                {String(poSuccess.status || "").toLowerCase() === "sent" ? "Purchase order submitted for approval" : "Purchase order saved as draft"}
+              </p>
+              <p className="mt-1 text-xs text-on-surface-variant">
+                {poSuccess.poNumber} · {poSuccess.itemCount} item{poSuccess.itemCount === 1 ? "" : "s"}
+              </p>
+              {String(poSuccess.status || "").toLowerCase() === "confirmed" && poSuccess.poId ? (
+                <Link to={`/receive?po=${poSuccess.poId}`} className="mt-2 inline-flex text-xs font-semibold text-primary hover:underline">
+                  Confirm delivery now
+                </Link>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => setPoSuccess(null)}
+              className="shrink-0 rounded-full p-1.5 text-on-surface-variant transition-colors hover:bg-surface-container-high"
+              aria-label="Dismiss"
+            >
+              <span className="material-symbols-outlined text-lg">close</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

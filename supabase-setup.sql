@@ -359,6 +359,7 @@ CREATE TRIGGER audit_purchase_orders AFTER INSERT OR UPDATE OR DELETE ON purchas
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventory_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE purchase_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_transfers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
 
@@ -415,6 +416,13 @@ CREATE POLICY "Stock movements read by ops roles" ON stock_movements
 
 CREATE POLICY "Stock movements write by warehouse/admin" ON stock_movements
   FOR INSERT WITH CHECK (public.current_role_name() IN ('Admin', 'Warehouse Staff'));
+
+-- Stock Transfers: warehouse/admin can read/write
+CREATE POLICY "Stock transfers read by ops roles" ON stock_transfers
+  FOR SELECT USING (public.current_role_name() IN ('Admin', 'Warehouse Staff', 'Management', 'Procurement Staff'));
+
+CREATE POLICY "Stock transfers write by warehouse/admin" ON stock_transfers
+  FOR ALL USING (public.current_role_name() IN ('Admin', 'Warehouse Staff'));
 
 -- ========================================
 -- Optional: audit_logs RLS (run after base setup; see migrations/002_audit_logs_rls.sql)

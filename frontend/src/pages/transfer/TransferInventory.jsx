@@ -2,17 +2,10 @@ import { useState, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { TransferScanModal, TransferManualModal, TransferBatchModal } from "./TransferModals";
 import { supabase } from "../../lib/supabase";
-import { getErrorMessage } from "../../lib/errors";
 import { useAuth } from "../../contexts/AuthContext";
+import { convertItemQuantity } from "../../lib/unitConversion";
+import { NotificationBell } from "../../components/NotificationBell";
 import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
-
-function headerUserLabel(p) {
-  if (!p) return "";
-  const fn = (p.first_name || "").trim();
-  const ln = (p.last_name || "").trim();
-  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
-  return p.email || "";
-}
 
 function transferStatusBadge(status) {
   const s = (status || "").toLowerCase();
@@ -44,260 +37,354 @@ function transferStatusBadge(status) {
   );
 }
 
+function normalizeLocationValue(raw) {
+  const trimmed = String(raw || "").trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function makeAvailabilityKey(itemId, location) {
+  return `${itemId}::${location}`;
+}
+
+function aggregateRequestedBySource(queue) {
+  const requested = new Map();
+  for (const row of queue) {
+    const itemId = row?.itemId;
+    const location = normalizeLocationValue(row?.fromLocation);
+    const qty = Number(row?.quantity ?? 0);
+    if (!itemId || !location || !Number.isFinite(qty) || qty <= 0) continue;
+    const key = makeAvailabilityKey(itemId, location);
+    requested.set(key, (requested.get(key) ?? 0) + qty);
+  }
+  return requested;
+}
+
+function profileDisplayName(profile) {
+  if (!profile) return "Inventory user";
+  const firstName = String(profile.first_name || "").trim();
+  const lastName = String(profile.last_name || "").trim();
+  if (firstName || lastName) return [firstName, lastName].filter(Boolean).join(" ");
+  return profile.email || "Inventory user";
+}
+
 export default function TransferInventory() {
-  const { profile } = useAuth();
-  const [activeModal, setActiveModal] = useState(null);
-  const closeModal = useCallback(() => setActiveModal(null), []);
-  const [recentLoading, setRecentLoading] = useState(true);
-  const [recentError, setRecentError] = useState("");
-  const [recentRows, setRecentRows] = useState([]);
+  const { profile, role } = useAuth();
+  const [entryStep, setEntryStep] = useState("select");
+  const [activeEntryMode, setActiveEntryMode] = useState("scan");
+  const [transferSuccess, setTransferSuccess] = useState(null);
+
+  const onManualTransferReviewDone = useCallback(
+    async ({ lineCount, unitCount, queue, submitIntent = "submit" }) => {
+      const itemIds = [...new Set(queue.map((row) => row.itemId).filter(Boolean))];
+      const requiredLocations = new Set(queue.map((row) => normalizeLocationValue(row.fromLocation)).filter(Boolean));
+      const availableBySource = new Map();
+
+      const { data: itemRows, error: itemErr } = await supabase
+        .from("inventory_items")
+        .select("id,unit_of_measure")
+        .in("id", itemIds);
+      if (itemErr) throw itemErr;
+      const baseUnitById = new Map((itemRows ?? []).map((r) => [r.id, String(r.unit_of_measure || "").trim() || "unit"]));
+
+      const normalizedQueue = [];
+      for (const row of queue) {
+        const baseUnit = baseUnitById.get(row.itemId) || "unit";
+        const fromUnit = String(row.unit || "").trim();
+        if (!fromUnit) throw new Error(`Unit is required for SKU ${row.sku || ""}.`);
+        const baseQty = await convertItemQuantity({
+          itemId: row.itemId,
+          qty: row.quantity,
+          fromUnit,
+          toUnit: baseUnit,
+        });
+        normalizedQueue.push({
+          ...row,
+          _baseQty: baseQty,
+          _baseUnit: baseUnit,
+          _fromUnit: fromUnit,
+        });
+      }
+
+      const requestedBySource = aggregateRequestedBySource(
+        normalizedQueue.map((r) => ({ ...r, quantity: r._baseQty }))
+      );
+
+      // Primary source of truth for per-location balances.
+      const { data: balances, error: balErr } = await supabase
+        .from("inventory_item_locations")
+        .select("item_id,location,quantity")
+        .in("item_id", itemIds);
+
+      if (!balErr) {
+        for (const bal of balances ?? []) {
+          const location = normalizeLocationValue(bal.location);
+          if (!location || !requiredLocations.has(location)) continue;
+          const key = makeAvailabilityKey(bal.item_id, location);
+          availableBySource.set(key, Number(bal.quantity ?? 0));
+        }
+      } else {
+        // Fallback: derive balances from stock movements in environments without per-location table.
+        const { data: movements, error: moveLoadErr } = await supabase
+          .from("stock_movements")
+          .select("item_id,movement_type,quantity,from_location,to_location")
+          .in("item_id", itemIds)
+          .order("created_at", { ascending: true })
+          .limit(10000);
+        if (moveLoadErr) throw moveLoadErr;
+
+        for (const move of movements ?? []) {
+          const qty = Number(move.quantity ?? 0);
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+          const type = String(move.movement_type || "").toLowerCase();
+          const src = normalizeLocationValue(move.from_location);
+          const dst = normalizeLocationValue(move.to_location);
+          if (type === "in" && dst && requiredLocations.has(dst)) {
+            const key = makeAvailabilityKey(move.item_id, dst);
+            availableBySource.set(key, (availableBySource.get(key) ?? 0) + qty);
+          } else if (type === "out" && src && requiredLocations.has(src)) {
+            const key = makeAvailabilityKey(move.item_id, src);
+            availableBySource.set(key, (availableBySource.get(key) ?? 0) - qty);
+          } else if (type === "transfer") {
+            if (src && requiredLocations.has(src)) {
+              const srcKey = makeAvailabilityKey(move.item_id, src);
+              availableBySource.set(srcKey, (availableBySource.get(srcKey) ?? 0) - qty);
+            }
+            if (dst && requiredLocations.has(dst)) {
+              const dstKey = makeAvailabilityKey(move.item_id, dst);
+              availableBySource.set(dstKey, (availableBySource.get(dstKey) ?? 0) + qty);
+            }
+          }
+        }
+      }
+
+      for (const [key, requestedQty] of requestedBySource.entries()) {
+        const availableQty = Math.max(0, Number(availableBySource.get(key) ?? 0));
+        if (availableQty < requestedQty) {
+          const [itemId, fromLocation] = key.split("::");
+          const line = normalizedQueue.find((row) => row.itemId === itemId && row.fromLocation === fromLocation);
+          const itemLabel = line?.sku ? `${line.sku} (${line.itemName || "Item"})` : "item";
+          throw new Error(
+            `Insufficient stock at "${fromLocation}" for ${itemLabel}. Available: ${availableQty}, requested: ${requestedQty}.`
+          );
+        }
+      }
+
+      const targetStatus = submitIntent === "draft" ? "draft" : "pending";
+
+      for (const row of normalizedQueue) {
+        const transferNumber = String(row.referenceNo || "").trim() || `TR-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const { data: transferRow, error: transferErr } = await supabase
+          .from("stock_transfers")
+          .insert({
+            transfer_number: transferNumber,
+            from_location: row.fromLocation,
+            to_location: row.toLocation,
+            status: targetStatus,
+            notes: [
+              row.transferDate ? `Transfer date: ${row.transferDate}` : "",
+              row.transferBy ? `Transfer by: ${row.transferBy}` : "",
+              row.requestedBy ? `Requested by: ${row.requestedBy}` : "",
+              row.attachmentPath ? `Attachment: ${row.attachmentPath}` : "",
+            ]
+              .filter(Boolean)
+              .join(" • ") || null,
+            created_by: profile?.id ?? null,
+          })
+          .select("id")
+          .single();
+        if (transferErr) throw transferErr;
+
+        const transferId = transferRow?.id;
+        const { error: itemErr } = await supabase.from("stock_transfer_items").insert({
+          transfer_id: transferId,
+          item_id: row.itemId,
+          quantity: row._baseQty,
+        });
+        if (itemErr) throw itemErr;
+      }
+
+      setTransferSuccess({ lineCount, unitCount, workflowStatus: targetStatus });
+    },
+    [profile?.id]
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setRecentLoading(true);
-      setRecentError("");
-      try {
-        const { data, error } = await supabase
-          .from("stock_transfers")
-          .select("id, transfer_number, from_location, to_location, status, created_at, stock_transfer_items(count)")
-          .order("created_at", { ascending: false })
-          .limit(25);
-        if (error) throw error;
-        if (!cancelled) setRecentRows(data ?? []);
-      } catch (e) {
-        if (!cancelled) setRecentError(getErrorMessage(e));
-      } finally {
-        if (!cancelled) setRecentLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!transferSuccess) return undefined;
+    const t = window.setTimeout(() => setTransferSuccess(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [transferSuccess]);
+
+
+  const entryActions = [
+    {
+      key: "scan",
+      title: "Scan SKU or Code",
+      icon: "qr_code_scanner",
+      onClick: () => {
+        setEntryStep("entry");
+        setActiveEntryMode("scan");
+      },
+    },
+    {
+      key: "manual",
+      title: "Manual Input",
+      icon: "edit_note",
+      onClick: () => {
+        setEntryStep("entry");
+        setActiveEntryMode("manual");
+      },
+    },
+    {
+      key: "batch",
+      title: "Batch Upload",
+      icon: "upload_file",
+      onClick: () => {
+        setEntryStep("entry");
+        setActiveEntryMode("batch");
+      },
+    },
+  ];
 
   return (
-    <div className="bg-surface text-on-surface min-h-dvh flex flex-col lg:h-dvh lg:max-h-dvh lg:overflow-hidden pb-24 md:pb-0">
-      <header className="fixed top-0 w-full z-50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl bg-gradient-to-b from-white/80 to-transparent dark:from-slate-900/80 dark:to-transparent shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
-        <div className="flex justify-between items-center h-14 px-4 sm:px-6 lg:px-8 w-full max-w-[1320px] mx-auto">
-          <div className="flex items-center gap-4 lg:gap-8 min-w-0">
+    <div className="min-h-dvh bg-surface text-on-surface selection:bg-primary-fixed selection:text-on-primary-fixed pb-20 md:pb-0">
+      <header className="fixed top-0 z-50 w-full border-b border-white/10 bg-white/80 shadow-sm shadow-blue-900/5 backdrop-blur-xl dark:bg-slate-900/80">
+        <div className="mx-auto flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8 max-w-[1440px]">
+          <div className="flex items-center gap-6 min-w-0">
             <Link
-              to="/"
-              className="text-lg sm:text-xl font-extrabold font-manrope text-blue-700 dark:text-blue-400 tracking-tight hover:opacity-80 transition-opacity shrink-0"
+              to="/dashboard"
+              className="text-xl font-bold tracking-tighter text-slate-900 transition-opacity hover:opacity-90 dark:text-white font-headline"
             >
-              The Fluid Curator
+              Inventory
             </Link>
-            <nav className="hidden md:flex gap-4 lg:gap-6 items-center shrink-0 text-sm">
-              <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/">
-                Dashboard
-              </Link>
-              <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/inventory">
-                Inventory
-              </Link>
-              <span className="font-manrope font-semibold text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 pb-0.5">
-                Transfer
-              </span>
-              <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/receive">
-                Receive
-              </Link>
-              <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/deliver">
-                Deliver
-              </Link>
-              <Link className="font-manrope font-semibold text-slate-500 dark:text-slate-400 hover:text-blue-500 transition-colors" to="/count">
-                Count
-              </Link>
-            </nav>
           </div>
-          <div className="flex items-center gap-1 sm:gap-3 min-w-0">
-            <div className="relative hidden lg:block">
-              <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
-              <input
-                className="pl-9 pr-3 py-1.5 bg-surface-container-highest border-none rounded-full text-xs w-40 xl:w-52 focus:ring-2 focus:ring-primary/20"
-                placeholder="Global Search..."
-                type="search"
-                aria-label="Global search"
-              />
-            </div>
-            <button type="button" className="p-2 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              <span className="material-symbols-outlined text-[22px]">notifications</span>
-            </button>
-            <button type="button" className="p-2 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              <span className="material-symbols-outlined text-[22px]">settings</span>
-            </button>
-            <div className="ml-1 shrink-0 ring-2 ring-surface-container-high rounded-full">
-              <UserAvatarOrIcon src={profile?.avatar_url} alt={headerUserLabel(profile)} size="md" />
-            </div>
+          <div className="flex items-center gap-3 sm:gap-4 lg:gap-6 min-w-0">
+            <NotificationBell />
+            {role ? (
+              <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                {role}
+              </span>
+            ) : null}
+            <span className="shrink-0 rounded-full border-2 border-surface-bright bg-surface-container-high p-0">
+              <UserAvatarOrIcon src={profile?.avatar_url} alt={profileDisplayName(profile)} size="md" />
+            </span>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col min-h-0 w-full max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 pt-14 pb-24 md:pb-3 lg:max-h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
-        <div className="shrink-0 mb-2 sm:mb-3 pt-2 lg:pt-1">
-          <h1 className="text-xl sm:text-2xl font-extrabold font-manrope tracking-tight text-on-surface mb-0.5">Transfer Inventory</h1>
-          <p className="text-on-surface-variant text-xs sm:text-sm max-w-2xl leading-snug line-clamp-2">
-            Move items between locations and track inventory transfers with precision and real-time oversight.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3 shrink-0">
-          <button
-            type="button"
-            onClick={() => setActiveModal("scan")}
-            className="group relative overflow-hidden bg-primary-container rounded-xl p-4 text-left transition-all hover:shadow-[0_8px_24px_-4px_rgba(0,71,141,0.15)] active:scale-[0.99] flex flex-col justify-between gap-3"
-          >
-            <div className="absolute top-0 right-0 p-1 opacity-10 pointer-events-none">
-              <span className="material-symbols-outlined !text-5xl">transfer_within_a_station</span>
-            </div>
-            <div>
-              <div className="w-10 h-10 bg-white/20 backdrop-blur-md rounded-lg flex items-center justify-center mb-2">
-                <span
-                  className="material-symbols-outlined text-white text-2xl"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  barcode_scanner
-                </span>
-              </div>
-              <h2 className="text-base font-bold font-manrope text-white mb-1">Scan SKU or Code</h2>
-              <p className="text-blue-100 text-[11px] sm:text-xs leading-snug line-clamp-2">
-                Quickly scan items and transfer them between locations using barcode or QR code.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 text-white font-semibold text-xs">
-              <span>Activate Scanner</span>
-              <span className="material-symbols-outlined text-sm">arrow_forward</span>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveModal("manual")}
-            className="group bg-surface-container-lowest rounded-xl p-4 text-left transition-all hover:shadow-[0_8px_24px_-4px_rgba(23,28,31,0.06)] active:scale-[0.99] flex flex-col justify-between gap-3 border border-outline-variant/10 dark:border-slate-700/50"
-          >
-            <div>
-              <div className="w-10 h-10 bg-secondary-container rounded-lg flex items-center justify-center mb-2">
-                <span className="material-symbols-outlined text-primary text-2xl">edit_note</span>
-              </div>
-              <h2 className="text-base font-bold font-manrope text-on-surface mb-1">Manual Input</h2>
-              <p className="text-on-surface-variant text-[11px] sm:text-xs leading-snug line-clamp-2">
-                Manually enter item details and transfer quantities between locations using guided forms.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 text-primary font-semibold text-xs">
-              <span>Open Form</span>
-              <span className="material-symbols-outlined text-sm">arrow_forward</span>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveModal("batch")}
-            className="group bg-surface-container-lowest rounded-xl p-4 text-left transition-all hover:shadow-[0_8px_24px_-4px_rgba(23,28,31,0.06)] active:scale-[0.99] flex flex-col justify-between gap-3 border border-outline-variant/10 dark:border-slate-700/50 sm:col-span-2 lg:col-span-1"
-          >
-            <div>
-              <div className="w-10 h-10 bg-surface-container-high rounded-lg flex items-center justify-center mb-2">
-                <span className="material-symbols-outlined text-on-surface-variant text-2xl">upload_file</span>
-              </div>
-              <h2 className="text-base font-bold font-manrope text-on-surface mb-1">Batch Upload</h2>
-              <p className="text-on-surface-variant text-[11px] sm:text-xs leading-snug line-clamp-2">
-                Upload a CSV or spreadsheet to transfer multiple items at once for large warehouse moves.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 text-primary font-semibold text-xs">
-              <span>Select File</span>
-              <span className="material-symbols-outlined text-sm">arrow_forward</span>
-            </div>
-          </button>
-        </div>
-
-        <section className="flex flex-col flex-1 min-h-0 overflow-hidden bg-surface-container-low rounded-xl p-3 sm:p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2 shrink-0">
-            <div>
-              <h3 className="text-base font-bold font-manrope text-on-surface leading-tight">Recent transfers</h3>
-              <p className="text-on-surface-variant text-[11px] sm:text-xs">Mula sa stock_transfers (pinakabago)</p>
-            </div>
-            <button type="button" className="text-primary font-semibold text-xs hover:underline inline-flex items-center gap-0.5">
-              View Activity Log
-              <span className="material-symbols-outlined text-sm">open_in_new</span>
-            </button>
-          </div>
-          <div className="bg-surface-container-lowest rounded-lg overflow-hidden flex-1 min-h-0 flex flex-col border border-outline-variant/10">
-            <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0 lg:overscroll-contain">
-              <table className="w-full text-left border-collapse min-w-[480px]">
-                <thead className="sticky top-0 z-[1] bg-surface-container-lowest shadow-sm">
-                  <tr className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 border-b border-surface-container">
-                    <th className="px-3 sm:px-4 py-2 text-left">Transfer ID</th>
-                    <th className="px-3 sm:px-4 py-2 text-left">From</th>
-                    <th className="px-3 sm:px-4 py-2 text-left">To</th>
-                    <th className="px-3 sm:px-4 py-2 text-left">Items</th>
-                    <th className="px-3 sm:px-4 py-2 text-left">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="text-xs sm:text-sm">
-                  {recentError ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 sm:px-4 py-4 text-error text-xs">
-                        {recentError}
-                      </td>
-                    </tr>
-                  ) : recentLoading ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 sm:px-4 py-4 text-on-surface-variant text-xs">
-                        Loading…
-                      </td>
-                    </tr>
-                  ) : recentRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 sm:px-4 py-4 text-on-surface-variant text-xs">
-                        Walang transfer record. Gumawa sa <code className="text-[10px]">stock_transfers</code> +{" "}
-                        <code className="text-[10px]">stock_transfer_items</code> para lumitaw dito.
-                      </td>
-                    </tr>
-                  ) : (
-                    recentRows.map((t, i) => {
-                      const cnt = Array.isArray(t.stock_transfer_items) ? t.stock_transfer_items[0]?.count : null;
-                      const lineCount = cnt != null ? cnt : 0;
-                      return (
-                        <tr
-                          key={t.id}
-                          className={`hover:bg-surface-container-low/50 transition-colors ${i > 0 ? "border-t border-surface-container/30" : ""}`}
+      <main className="mx-auto w-full max-w-[1500px] px-2 pb-4 pt-[4.2rem] sm:px-3 lg:px-4">
+        <section className={`${entryStep === "select" ? "min-h-[calc(100dvh-4.8rem)] flex items-center justify-center" : "py-1"}`}>
+          <div className={`relative mx-auto overflow-hidden rounded-[1.4rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)] ${entryStep === "select" ? "w-full max-w-[1040px]" : "w-full"}`}>
+            <div className={entryStep === "select" ? "min-h-[calc(100dvh-14rem)]" : "min-h-[calc(100dvh-5.2rem)]"}>
+              {entryStep === "select" ? (
+                <div className="flex h-full flex-col">
+                  <div className="relative bg-primary px-6 py-6 text-center text-white">
+                    <Link
+                      to="/dashboard"
+                      className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition-all hover:bg-white/20"
+                      aria-label="Close transfer page"
+                      title="Close"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </Link>
+                    <h2 className="text-3xl font-black font-headline tracking-tight">Transfer Inventory</h2>
+                    <p className="mt-2 text-sm text-white/90">Select a method to transfer items</p>
+                  </div>
+                  <div className="flex-1 min-h-0 p-5 sm:p-6 grid place-items-center">
+                    <div className="mx-auto grid w-full max-w-5xl translate-y-8 md:translate-y-10 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {entryActions.map((action) => (
+                        <button
+                          key={action.key}
+                          type="button"
+                          onClick={action.onClick}
+                          className="group rounded-2xl border border-slate-200/80 bg-white p-6 text-center shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_14px_30px_rgba(59,130,246,0.12)]"
                         >
-                          <td className="px-3 sm:px-4 py-2 font-medium">{t.transfer_number ?? t.id}</td>
-                          <td className="px-3 sm:px-4 py-2 truncate max-w-[10rem]" title={t.from_location}>
-                            {t.from_location}
-                          </td>
-                          <td className="px-3 sm:px-4 py-2 truncate max-w-[10rem]" title={t.to_location}>
-                            {t.to_location}
-                          </td>
-                          <td className="px-3 sm:px-4 py-2">{lineCount} line(s)</td>
-                          <td className="px-3 sm:px-4 py-2">{transferStatusBadge(t.status)}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                          <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                            <span className="material-symbols-outlined text-[22px]">{action.icon}</span>
+                          </span>
+                          <span className="block text-lg font-bold text-on-surface">{action.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative h-[calc(100dvh-6.3rem)] min-h-0 overflow-hidden bg-transparent p-1 sm:p-1.5 lg:p-2 flex flex-col">
+                  <div
+                    className={`mb-1.5 flex items-center justify-between rounded-xl px-3 py-1.5 ${
+                      activeEntryMode === "manual"
+                        ? "bg-primary text-white"
+                        : "border border-outline-variant/20 bg-white/80"
+                    }`}
+                  >
+                    <span className={`text-xs font-semibold uppercase tracking-wider ${activeEntryMode === "manual" ? "text-white" : "text-primary/70"}`}>
+                      {entryActions.find((a) => a.key === activeEntryMode)?.title || "Transfer"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEntryStep("select")}
+                      className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-all ${
+                        activeEntryMode === "manual"
+                          ? "border border-white/25 bg-white/10 text-white hover:bg-white/20"
+                          : "border border-outline-variant/20 bg-white text-on-surface-variant hover:border-error/20 hover:text-error"
+                      }`}
+                      aria-label="Back to transfer methods"
+                      title="Close to transfer methods"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </div>
+                  {activeEntryMode === "scan" ? (
+                    <div className="flex-1 min-h-0">
+                      <TransferScanModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} />
+                    </div>
+                  ) : null}
+                  {activeEntryMode === "manual" ? (
+                    <div className="flex-1 min-h-0">
+                      <TransferManualModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} />
+                    </div>
+                  ) : null}
+                  {activeEntryMode === "batch" ? (
+                    <div className="flex-1 min-h-0">
+                      <TransferBatchModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} />
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         </section>
       </main>
 
-      <div className="fixed bottom-4 right-4 max-w-[280px] p-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl rounded-xl shadow-xl border border-white/20 z-30 hidden 2xl:block pointer-events-auto">
-        <div className="flex items-start gap-3">
-          <div className="p-1.5 bg-blue-50 dark:bg-blue-950/50 rounded-lg shrink-0">
-            <span className="material-symbols-outlined text-primary text-lg">info</span>
-          </div>
-          <div className="min-w-0">
-            <h4 className="font-bold text-xs mb-0.5 font-headline">Transfer Guidelines</h4>
-            <p className="text-[11px] text-on-surface-variant leading-snug">
-              Scan items at both origin and destination to keep inventory accurate.
-            </p>
+      {transferSuccess ? (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] w-[min(100%-2rem,400px)] pointer-events-auto"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-3 rounded-2xl border border-green-200/80 dark:border-green-800/60 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-[0_12px_40px_-8px_rgba(0,0,0,0.2)] p-4 pr-3">
+            <div className="p-2 rounded-xl bg-green-50 dark:bg-green-950/50 shrink-0">
+              <span className="material-symbols-outlined text-green-700 dark:text-green-400 text-2xl">check_circle</span>
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="font-bold text-sm text-on-surface font-headline">
+                {transferSuccess.workflowStatus === "draft" ? "Transfer saved as draft" : "Transfer submitted for approval"}
+              </p>
+              <p className="text-xs text-on-surface-variant mt-1">
+                {transferSuccess.lineCount} line{transferSuccess.lineCount === 1 ? "" : "s"} · {transferSuccess.unitCount} unit
+                {transferSuccess.unitCount === 1 ? "" : "s"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTransferSuccess(null)}
+              className="shrink-0 p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors"
+              aria-label="Dismiss"
+            >
+              <span className="material-symbols-outlined text-lg">close</span>
+            </button>
           </div>
         </div>
-      </div>
-
-      <TransferScanModal open={activeModal === "scan"} onClose={closeModal} />
-      <TransferManualModal open={activeModal === "manual"} onClose={closeModal} />
-      <TransferBatchModal open={activeModal === "batch"} onClose={closeModal} />
+      ) : null}
 
       <nav className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-safe pt-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-lg rounded-t-2xl shadow-[0_-8px_30px_rgb(0,0,0,0.04)] border-t border-slate-100 dark:border-slate-800">
         <Link to="/receive" className="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 px-4 py-1 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl">

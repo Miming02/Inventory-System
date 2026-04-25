@@ -2,254 +2,367 @@ import { useState, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { DeliverScanModal, DeliverManualModal, DeliverBatchModal } from "./DeliverModals";
 import { supabase } from "../../lib/supabase";
-import { getErrorMessage } from "../../lib/errors";
 import { useAuth } from "../../contexts/AuthContext";
+import { convertItemQuantity } from "../../lib/unitConversion";
+import { NotificationBell } from "../../components/NotificationBell";
 import { UserAvatarOrIcon } from "../../components/UserAvatarOrIcon";
 
-function headerUserLabel(p) {
-  if (!p) return "";
-  const fn = (p.first_name || "").trim();
-  const ln = (p.last_name || "").trim();
-  if (fn || ln) return [fn, ln].filter(Boolean).join(" ");
-  return p.email || "";
+function normalizeLocationValue(raw) {
+  const trimmed = String(raw || "").trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function makeAvailabilityKey(itemId, location) {
+  return `${itemId}::${location}`;
+}
+
+function aggregateRequestedBySource(queue) {
+  const requested = new Map();
+  for (const row of queue) {
+    const itemId = row?.itemId;
+    const location = normalizeLocationValue(row?.shipFrom);
+    const qty = Number(row?.quantity ?? 0);
+    if (!itemId || !location || !Number.isFinite(qty) || qty <= 0) continue;
+    const key = makeAvailabilityKey(itemId, location);
+    requested.set(key, (requested.get(key) ?? 0) + qty);
+  }
+  return requested;
+}
+
+function profileDisplayName(profile) {
+  if (!profile) return "Inventory user";
+  const firstName = String(profile.first_name || "").trim();
+  const lastName = String(profile.last_name || "").trim();
+  if (firstName || lastName) return [firstName, lastName].filter(Boolean).join(" ");
+  return profile.email || "Inventory user";
 }
 
 export default function DeliverInventory() {
-  const { profile } = useAuth();
-  const [activeModal, setActiveModal] = useState(null);
-  const closeModal = useCallback(() => setActiveModal(null), []);
-  const [recentLoading, setRecentLoading] = useState(true);
-  const [recentError, setRecentError] = useState("");
-  const [recentOut, setRecentOut] = useState([]);
+  const { profile, role } = useAuth();
+  const [entryStep, setEntryStep] = useState("select");
+  const [activeEntryMode, setActiveEntryMode] = useState("scan");
+  const [deliverSuccess, setDeliverSuccess] = useState(null);
+
+  const onDeliverManualReviewDone = useCallback(
+    async ({ lineCount, unitCount, queue, submitForApproval }) => {
+      const itemIds = [...new Set(queue.map((row) => row.itemId).filter(Boolean))];
+      const requiredLocations = new Set(queue.map((row) => normalizeLocationValue(row.shipFrom)).filter(Boolean));
+      const availableBySource = new Map();
+
+      const { data: itemRows, error: itemErr } = await supabase
+        .from("inventory_items")
+        .select("id,unit_of_measure")
+        .in("id", itemIds);
+      if (itemErr) throw itemErr;
+      const baseUnitById = new Map((itemRows ?? []).map((r) => [r.id, String(r.unit_of_measure || "").trim() || "unit"]));
+
+      const normalizedQueue = [];
+      for (const row of queue) {
+        const baseUnit = baseUnitById.get(row.itemId) || "unit";
+        const fromUnit = String(row.unit || "").trim();
+        if (!fromUnit) throw new Error(`Unit is required for SKU ${row.sku || ""}.`);
+        const baseQty = await convertItemQuantity({
+          itemId: row.itemId,
+          qty: row.quantity,
+          fromUnit,
+          toUnit: baseUnit,
+        });
+        normalizedQueue.push({
+          ...row,
+          _baseQty: baseQty,
+          _baseUnit: baseUnit,
+          _fromUnit: fromUnit,
+        });
+      }
+
+      const requestedBySource = aggregateRequestedBySource(
+        normalizedQueue.map((r) => ({ ...r, quantity: r._baseQty }))
+      );
+
+      const { data: balances, error: balErr } = await supabase
+        .from("inventory_item_locations")
+        .select("item_id,location,quantity")
+        .in("item_id", itemIds);
+
+      if (!balErr) {
+        for (const bal of balances ?? []) {
+          const location = normalizeLocationValue(bal.location);
+          if (!location || !requiredLocations.has(location)) continue;
+          const key = makeAvailabilityKey(bal.item_id, location);
+          availableBySource.set(key, Number(bal.quantity ?? 0));
+        }
+      } else {
+        const { data: movements, error: moveLoadErr } = await supabase
+          .from("stock_movements")
+          .select("item_id,movement_type,quantity,from_location,to_location")
+          .in("item_id", itemIds)
+          .order("created_at", { ascending: true })
+          .limit(10000);
+        if (moveLoadErr) throw moveLoadErr;
+
+        for (const move of movements ?? []) {
+          const qty = Number(move.quantity ?? 0);
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+          const type = String(move.movement_type || "").toLowerCase();
+          const src = normalizeLocationValue(move.from_location);
+          const dst = normalizeLocationValue(move.to_location);
+          if (type === "in" && dst && requiredLocations.has(dst)) {
+            const key = makeAvailabilityKey(move.item_id, dst);
+            availableBySource.set(key, (availableBySource.get(key) ?? 0) + qty);
+          } else if (type === "out" && src && requiredLocations.has(src)) {
+            const key = makeAvailabilityKey(move.item_id, src);
+            availableBySource.set(key, (availableBySource.get(key) ?? 0) - qty);
+          } else if (type === "transfer") {
+            if (src && requiredLocations.has(src)) {
+              const srcKey = makeAvailabilityKey(move.item_id, src);
+              availableBySource.set(srcKey, (availableBySource.get(srcKey) ?? 0) - qty);
+            }
+            if (dst && requiredLocations.has(dst)) {
+              const dstKey = makeAvailabilityKey(move.item_id, dst);
+              availableBySource.set(dstKey, (availableBySource.get(dstKey) ?? 0) + qty);
+            }
+          }
+        }
+      }
+
+      for (const [key, requestedQty] of requestedBySource.entries()) {
+        const availableQty = Math.max(0, Number(availableBySource.get(key) ?? 0));
+        if (availableQty < requestedQty) {
+          const [itemId, shipFrom] = key.split("::");
+          const line = normalizedQueue.find((row) => row.itemId === itemId && row.shipFrom === shipFrom);
+          const itemLabel = line?.sku ? `${line.sku} (${line.itemName || "Item"})` : "item";
+          throw new Error(
+            `Insufficient stock at "${shipFrom}" for ${itemLabel}. Available: ${availableQty}, requested: ${requestedQty}.`
+          );
+        }
+      }
+
+      const groups = new Map();
+      for (const row of normalizedQueue) {
+        const key = `${row.referenceNo}::${row.customerName}::${row.deliveryDate}`;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            header: row,
+            lines: [],
+          });
+        }
+        groups.get(key).lines.push(row);
+      }
+
+      for (const [, group] of groups) {
+        const headerRow = group.header;
+        const { data: createdRequest, error: deliveryErr } = await supabase
+          .from("delivery_requests")
+          .insert({
+            reference_no: headerRow.referenceNo,
+            customer_name: headerRow.customerName,
+            delivery_date: headerRow.deliveryDate,
+            attachment_path: headerRow.attachmentPath || null,
+            status: submitForApproval ? "pending_approval" : "draft",
+            submitted_by: submitForApproval ? profile?.id ?? null : null,
+            created_by: profile?.id ?? null,
+          })
+          .select("id")
+          .single();
+        if (deliveryErr) throw deliveryErr;
+
+        const itemsPayload = group.lines.map((row) => ({
+          delivery_request_id: createdRequest.id,
+          item_id: row.itemId,
+          sku: row.sku,
+          item_name: row.itemName || row.sku || "Item",
+          quantity: row.quantity,
+          unit_of_measure: row._fromUnit || row.unit || "unit",
+          from_location: row.shipFrom || null,
+          to_location: row.shipTo || null,
+        }));
+        if (itemsPayload.length > 0) {
+          const { error: itemErr } = await supabase.from("delivery_request_items").insert(itemsPayload);
+          if (itemErr) throw itemErr;
+        }
+      }
+      setDeliverSuccess({ lineCount, unitCount, submitted: !!submitForApproval });
+    },
+    [profile?.id]
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setRecentLoading(true);
-      setRecentError("");
-      try {
-        const { data, error } = await supabase
-          .from("stock_movements")
-          .select("id, quantity, created_at, to_location, reference_type, inventory_items ( name, sku )")
-          .eq("movement_type", "out")
-          .order("created_at", { ascending: false })
-          .limit(20);
-        if (error) throw error;
-        if (!cancelled) setRecentOut(data ?? []);
-      } catch (e) {
-        if (!cancelled) setRecentError(getErrorMessage(e));
-      } finally {
-        if (!cancelled) setRecentLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!deliverSuccess) return undefined;
+    const t = window.setTimeout(() => setDeliverSuccess(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [deliverSuccess]);
+
+  const entryActions = [
+    {
+      key: "scan",
+      title: "Scan SKU or Code",
+      icon: "qr_code_scanner",
+      onClick: () => {
+        setEntryStep("entry");
+        setActiveEntryMode("scan");
+      },
+    },
+    {
+      key: "manual",
+      title: "Manual Input",
+      icon: "edit_note",
+      onClick: () => {
+        setEntryStep("entry");
+        setActiveEntryMode("manual");
+      },
+    },
+    {
+      key: "batch",
+      title: "Batch Upload",
+      icon: "upload_file",
+      onClick: () => {
+        setEntryStep("entry");
+        setActiveEntryMode("batch");
+      },
+    },
+  ];
 
   return (
-    <div className="bg-surface text-on-surface min-h-dvh flex flex-col lg:h-dvh lg:max-h-dvh lg:overflow-hidden pb-24 md:pb-0">
-      <header className="fixed top-0 w-full z-50 bg-white/70 backdrop-blur-xl bg-gradient-to-b from-white/80 to-transparent">
-        <div className="flex justify-between items-center px-4 sm:px-6 lg:px-8 h-14 w-full max-w-[1320px] mx-auto">
-          <div className="flex items-center gap-6 lg:gap-8 min-w-0">
+    <div className="min-h-dvh overflow-hidden bg-surface text-on-surface selection:bg-primary-fixed selection:text-on-primary-fixed">
+      <header className="fixed top-0 z-50 w-full border-b border-white/10 bg-white/80 shadow-sm shadow-blue-900/5 backdrop-blur-xl dark:bg-slate-900/80">
+        <div className="mx-auto flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8 max-w-[1440px]">
+          <div className="flex items-center gap-6 min-w-0">
             <Link
-              to="/"
-              className="text-lg sm:text-xl font-extrabold font-manrope text-blue-700 tracking-tight hover:opacity-80 transition-opacity shrink-0"
+              to="/dashboard"
+              className="text-xl font-bold tracking-tighter text-slate-900 transition-opacity hover:opacity-90 dark:text-white font-headline"
             >
-              The Fluid Curator
+              Inventory
             </Link>
-            <nav className="hidden md:flex gap-6 items-center">
-              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/inventory">
-                Inventory
-              </Link>
-              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/transfer">
-                Transfer
-              </Link>
-              <Link className="font-manrope tracking-tight font-semibold text-blue-600 border-b-2 border-blue-600 pb-0.5" to="/deliver">
-                Deliver
-              </Link>
-              <Link className="font-manrope tracking-tight font-semibold text-slate-500 hover:text-blue-500 transition-colors duration-300" to="/count">
-                Count
-              </Link>
-            </nav>
           </div>
-          <div className="flex items-center gap-4">
-            <button className="p-2 text-slate-500 hover:text-blue-600 transition-all active:opacity-80" type="button">
-              <span className="material-symbols-outlined">notifications</span>
-            </button>
-            <button className="p-2 text-slate-500 hover:text-blue-600 transition-all active:opacity-80" type="button">
-              <span className="material-symbols-outlined">settings</span>
-            </button>
-            <div className="rounded-full border-2 border-primary-container bg-surface-container-high">
-              <UserAvatarOrIcon src={profile?.avatar_url} alt={headerUserLabel(profile)} size="md" />
-            </div>
+          <div className="flex items-center gap-3 sm:gap-4 lg:gap-6 min-w-0">
+            <NotificationBell />
+            {role ? (
+              <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                {role}
+              </span>
+            ) : null}
+            <span className="shrink-0 rounded-full border-2 border-surface-bright bg-surface-container-high p-0">
+              <UserAvatarOrIcon src={profile?.avatar_url} alt={profileDisplayName(profile)} size="md" />
+            </span>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col min-h-0 w-full max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 pt-14 pb-24 md:pb-3 lg:max-h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
-        <div className="shrink-0 mb-2 sm:mb-3 pt-2 lg:pt-1">
-          <h1 className="text-xl sm:text-2xl font-extrabold font-manrope tracking-tight text-on-surface mb-0.5">Deliver Inventory</h1>
-          <p className="text-on-surface-variant text-xs sm:text-sm max-w-2xl leading-snug line-clamp-2">
-            Send items to external parties and track outgoing deliveries with professional precision.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3 shrink-0">
-          <button
-            type="button"
-            onClick={() => setActiveModal("scan")}
-            className="group relative overflow-hidden bg-primary-container rounded-xl p-4 text-left transition-all hover:shadow-[0_8px_24px_-4px_rgba(0,71,141,0.15)] active:scale-[0.99] flex flex-col justify-between gap-3"
-          >
-            <div className="absolute top-0 right-0 p-1 opacity-10 pointer-events-none">
-              <span className="material-symbols-outlined !text-5xl">qr_code_scanner</span>
-            </div>
-            <div>
-              <div className="w-10 h-10 bg-white/20 backdrop-blur-md rounded-lg flex items-center justify-center mb-2">
-                <span className="material-symbols-outlined text-white text-2xl">qr_code_scanner</span>
-              </div>
-              <h2 className="text-base font-bold font-manrope text-white mb-1">Scan SKU or Code</h2>
-              <p className="text-blue-100 text-[11px] sm:text-xs leading-snug line-clamp-2">
-                Scan items and record outbound deliveries (stock movements) using barcode or QR.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 text-white font-semibold text-xs">
-              <span>Activate Scanner</span>
-              <span className="material-symbols-outlined text-sm">arrow_forward</span>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveModal("manual")}
-            className="group bg-surface-container-lowest rounded-xl p-4 text-left transition-all hover:shadow-[0_8px_24px_-4px_rgba(23,28,31,0.06)] active:scale-[0.99] flex flex-col justify-between gap-3 border border-outline-variant/10"
-          >
-            <div>
-              <div className="w-10 h-10 bg-secondary-container rounded-lg flex items-center justify-center mb-2">
-                <span className="material-symbols-outlined text-primary text-2xl">edit_note</span>
-              </div>
-              <h2 className="text-base font-bold font-manrope text-on-surface mb-1">Manual Input</h2>
-              <p className="text-on-surface-variant text-[11px] sm:text-xs leading-snug line-clamp-2">
-                Manually enter item details and delivery information for curated, bespoke shipments.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 text-primary font-semibold text-xs">
-              <span>Open Form</span>
-              <span className="material-symbols-outlined text-sm">arrow_forward</span>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveModal("batch")}
-            className="group bg-surface-container-lowest rounded-xl p-4 text-left transition-all hover:shadow-[0_8px_24px_-4px_rgba(23,28,31,0.06)] active:scale-[0.99] flex flex-col justify-between gap-3 border border-outline-variant/10 sm:col-span-2 lg:col-span-1"
-          >
-            <div>
-              <div className="w-10 h-10 bg-surface-container-high rounded-lg flex items-center justify-center mb-2">
-                <span className="material-symbols-outlined text-on-surface-variant text-2xl">upload_file</span>
-              </div>
-              <h2 className="text-base font-bold font-manrope text-on-surface mb-1">Batch Upload</h2>
-              <p className="text-on-surface-variant text-[11px] sm:text-xs leading-snug line-clamp-2">
-                Upload a CSV or spreadsheet to deliver multiple items at once. Optimized for large scale logistics.
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 text-primary font-semibold text-xs">
-              <span>Select File</span>
-              <span className="material-symbols-outlined text-sm">arrow_forward</span>
-            </div>
-          </button>
-        </div>
-
-        <section className="bg-surface-container-low rounded-xl p-3 sm:p-4 flex flex-col flex-1 min-h-0 overflow-hidden shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2 shrink-0">
-            <div>
-              <h3 className="text-base font-bold font-manrope text-on-surface leading-tight">Recent outbound</h3>
-              <p className="text-on-surface-variant text-[11px] sm:text-xs">stock_movements · type out</p>
-            </div>
-          </div>
-          <div className="bg-surface-container-lowest rounded-lg overflow-hidden flex-1 min-h-0 border border-outline-variant/10">
-            <div className="overflow-x-auto overflow-y-auto max-h-[280px] lg:max-h-[320px]">
-              <table className="w-full text-left border-collapse min-w-[480px] text-xs sm:text-sm">
-                <thead className="sticky top-0 bg-surface-container-lowest z-[1] shadow-sm">
-                  <tr className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 border-b border-surface-container">
-                    <th className="px-3 sm:px-4 py-2">Item</th>
-                    <th className="px-3 sm:px-4 py-2">SKU</th>
-                    <th className="px-3 sm:px-4 py-2 text-right">Qty</th>
-                    <th className="px-3 sm:px-4 py-2">To / ref</th>
-                    <th className="px-3 sm:px-4 py-2">When</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentError ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-3 text-error">
-                        {recentError}
-                      </td>
-                    </tr>
-                  ) : recentLoading ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-3 text-on-surface-variant">
-                        Loading…
-                      </td>
-                    </tr>
-                  ) : recentOut.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-3 text-on-surface-variant">
-                        Walang outbound movement. Mag-insert ng <code className="text-[10px]">stock_movements</code> na{" "}
-                        <code className="text-[10px]">out</code> para sa deliver flow.
-                      </td>
-                    </tr>
-                  ) : (
-                    recentOut.map((m) => {
-                      const inv = m.inventory_items;
-                      const item = Array.isArray(inv) ? inv[0] : inv;
-                      const when = m.created_at ? new Date(m.created_at).toLocaleString() : "—";
-                      return (
-                        <tr key={m.id} className="border-t border-surface-container/30 hover:bg-surface-container-low/40">
-                          <td className="px-3 sm:px-4 py-2 font-medium truncate max-w-[10rem]">{item?.name ?? "—"}</td>
-                          <td className="px-3 sm:px-4 py-2 font-mono text-[11px]">{item?.sku ?? "—"}</td>
-                          <td className="px-3 sm:px-4 py-2 text-right">-{Math.abs(m.quantity ?? 0)}</td>
-                          <td className="px-3 sm:px-4 py-2 truncate max-w-[8rem]" title={m.to_location || ""}>
-                            {m.to_location || m.reference_type || "—"}
-                          </td>
-                          <td className="px-3 sm:px-4 py-2 text-on-surface-variant whitespace-nowrap">{when}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+      <main className="mx-auto w-full max-w-[1500px] px-2 pb-4 pt-[4.2rem] sm:px-3 lg:px-4">
+        <section className={`${entryStep === "select" ? "min-h-[calc(100dvh-4.8rem)] flex items-center justify-center" : "py-1"}`}>
+          <div className={`relative mx-auto overflow-hidden rounded-[1.4rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)] ${entryStep === "select" ? "w-full max-w-[1040px]" : "w-full"}`}>
+            <div className={entryStep === "select" ? "min-h-[calc(100dvh-14rem)]" : "min-h-[calc(100dvh-5.2rem)]"}>
+              {entryStep === "select" ? (
+                <div className="flex h-full flex-col">
+                  <div className="relative bg-primary px-6 py-6 text-center text-white">
+                    <Link
+                      to="/dashboard"
+                      className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition-all hover:bg-white/20"
+                      aria-label="Close deliver page"
+                      title="Close"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </Link>
+                    <h2 className="text-3xl font-black font-headline tracking-tight">Deliver Inventory</h2>
+                    <p className="mt-2 text-sm text-white/90">Select a method to deliver items</p>
+                  </div>
+                  <div className="flex-1 min-h-0 p-5 sm:p-6 grid place-items-center">
+                    <div className="mx-auto grid w-full max-w-5xl translate-y-8 md:translate-y-10 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {entryActions.map((action) => (
+                        <button
+                          key={action.key}
+                          type="button"
+                          onClick={action.onClick}
+                          className="group rounded-2xl border border-slate-200/80 bg-white p-6 text-center shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_14px_30px_rgba(59,130,246,0.12)]"
+                        >
+                          <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                            <span className="material-symbols-outlined text-[22px]">{action.icon}</span>
+                          </span>
+                          <span className="block text-lg font-bold text-on-surface">{action.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative h-[calc(100dvh-6.3rem)] min-h-0 overflow-hidden bg-transparent p-1 sm:p-1.5 lg:p-2 flex flex-col">
+                  <div
+                    className={`mb-1.5 flex items-center justify-between rounded-xl px-3 py-1.5 ${
+                      activeEntryMode === "manual"
+                        ? "bg-primary text-white"
+                        : "border border-outline-variant/20 bg-white/80"
+                    }`}
+                  >
+                    <span className={`text-xs font-semibold uppercase tracking-wider ${activeEntryMode === "manual" ? "text-white" : "text-primary/70"}`}>
+                      {entryActions.find((a) => a.key === activeEntryMode)?.title || "Deliver"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEntryStep("select")}
+                      className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-all ${
+                        activeEntryMode === "manual"
+                          ? "border border-white/25 bg-white/10 text-white hover:bg-white/20"
+                          : "border border-outline-variant/20 bg-white text-on-surface-variant hover:border-error/20 hover:text-error"
+                      }`}
+                      aria-label="Back to deliver methods"
+                      title="Close to deliver methods"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </div>
+                  {activeEntryMode === "scan" ? (
+                    <div className="flex-1 min-h-0">
+                      <DeliverScanModal open inline onClose={() => {}} onReviewDone={onDeliverManualReviewDone} />
+                    </div>
+                  ) : null}
+                  {activeEntryMode === "manual" ? (
+                    <div className="flex-1 min-h-0">
+                      <DeliverManualModal open inline onClose={() => {}} onReviewDone={onDeliverManualReviewDone} />
+                    </div>
+                  ) : null}
+                  {activeEntryMode === "batch" ? (
+                    <div className="flex-1 min-h-0">
+                      <DeliverBatchModal open inline onClose={() => {}} onReviewDone={onDeliverManualReviewDone} />
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         </section>
       </main>
 
-      <DeliverScanModal open={activeModal === "scan"} onClose={closeModal} />
-      <DeliverManualModal open={activeModal === "manual"} onClose={closeModal} />
-      <DeliverBatchModal open={activeModal === "batch"} onClose={closeModal} />
-
-      <nav className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-safe pt-2 bg-white/80 backdrop-blur-lg rounded-t-2xl shadow-[0_-8px_30px_rgb(0,0,0,0.04)] border-t border-slate-100">
-        <Link to="/receive" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
-          <span className="material-symbols-outlined">input</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Receive</span>
-        </Link>
-        <Link to="/transfer" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
-          <span className="material-symbols-outlined">sync_alt</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Transfer</span>
-        </Link>
-        <button type="button" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
-          <span className="material-symbols-outlined">precision_manufacturing</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Work</span>
-        </button>
-        <div className="flex flex-col items-center justify-center bg-blue-50 text-blue-700 rounded-xl px-4 py-1">
-          <span className="material-symbols-outlined text-primary">local_shipping</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Deliver</span>
+      {deliverSuccess ? (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] w-[min(100%-2rem,400px)] pointer-events-auto"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-3 rounded-2xl border border-green-200/80 dark:border-green-800/60 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-[0_12px_40px_-8px_rgba(0,0,0,0.2)] p-4 pr-3">
+            <div className="p-2 rounded-xl bg-green-50 dark:bg-green-950/50 shrink-0">
+              <span className="material-symbols-outlined text-green-700 dark:text-green-400 text-2xl">check_circle</span>
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="font-bold text-sm text-on-surface font-headline">
+                {deliverSuccess.submitted ? "Delivery submitted for approval" : "Delivery saved as draft"}
+              </p>
+              <p className="text-xs text-on-surface-variant mt-1">
+                {deliverSuccess.lineCount} line{deliverSuccess.lineCount === 1 ? "" : "s"} · {deliverSuccess.unitCount} unit
+                {deliverSuccess.unitCount === 1 ? "" : "s"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeliverSuccess(null)}
+              className="shrink-0 p-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors"
+              aria-label="Dismiss"
+            >
+              <span className="material-symbols-outlined text-lg">close</span>
+            </button>
+          </div>
         </div>
-        <button type="button" className="flex flex-col items-center justify-center text-slate-400 px-4 py-1 hover:bg-slate-50 rounded-xl">
-          <span className="material-symbols-outlined">fact_check</span>
-          <span className="font-inter text-[10px] font-medium uppercase tracking-widest mt-1">Audit</span>
-        </button>
-      </nav>
+      ) : null}
+
     </div>
   );
 }

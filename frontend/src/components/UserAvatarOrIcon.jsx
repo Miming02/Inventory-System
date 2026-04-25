@@ -19,7 +19,12 @@ export function UserAvatarOrIcon({ src, alt = "", size = "md", className = "" })
   const [broken, setBroken] = useState(false);
   const dim = sizeClass[size] ?? sizeClass.md;
   const ic = iconClass[size] ?? iconClass.md;
-  const showImg = Boolean(src) && !broken;
+  const normalizedSrc = String(src || "").trim();
+  const looksLikeUrl =
+    normalizedSrc.length > 0 &&
+    !/^(null|undefined)$/i.test(normalizedSrc) &&
+    /^(https?:\/\/|\/|data:image\/|blob:)/i.test(normalizedSrc);
+  const showImg = looksLikeUrl && !broken;
 
   if (showImg) {
     return (

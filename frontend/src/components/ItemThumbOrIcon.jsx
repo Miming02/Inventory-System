@@ -17,7 +17,12 @@ export function ItemThumbOrIcon({ src, name = "Item", size = "sm", className = "
   const [broken, setBroken] = useState(false);
   const dim = wrapClass[size] ?? wrapClass.sm;
   const iz = iconSz[size] ?? iconSz.sm;
-  const showImg = Boolean(src) && !broken;
+  const normalizedSrc = String(src || "").trim();
+  const looksLikeUrl =
+    normalizedSrc.length > 0 &&
+    !/^(null|undefined)$/i.test(normalizedSrc) &&
+    /^(https?:\/\/|\/|data:image\/|blob:)/i.test(normalizedSrc);
+  const showImg = looksLikeUrl && !broken;
 
   if (showImg) {
     return (

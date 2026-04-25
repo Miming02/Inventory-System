@@ -43,7 +43,7 @@ export default function Login() {
         setError(getErrorMessage(error));
       } else {
         // On successful login, redirect to dashboard
-        navigate("/");
+        navigate("/dashboard");
       }
     } catch (e) {
       setError(getErrorMessage(e) || "Login failed. Please try again.");

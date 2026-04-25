@@ -12,28 +12,36 @@ export default function AuditLogs() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (targetPage = page) => {
     if (!canManageUsers(role)) return;
     setLoading(true);
     setError("");
+    const from = (targetPage - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE;
     const { data, error: qErr } = await supabase
       .from("audit_logs")
       .select("id,created_at,action,table_name,record_id,user_id")
       .order("created_at", { ascending: false })
-      .limit(PAGE_SIZE);
+      .range(from, to);
 
     if (qErr) {
       setError(getErrorMessage(qErr));
       setRows([]);
+      setHasMore(false);
     } else {
-      setRows(data ?? []);
+      const fetched = data ?? [];
+      setRows(fetched.slice(0, PAGE_SIZE));
+      setHasMore(fetched.length > PAGE_SIZE);
+      setPage(targetPage);
     }
     setLoading(false);
-  }, [role]);
+  }, [role, page]);
 
   useEffect(() => {
-    if (!authLoading && canManageUsers(role)) load();
+    if (!authLoading && canManageUsers(role)) load(1);
   }, [authLoading, role, load]);
 
   if (!authLoading && !canManageUsers(role)) {
@@ -41,15 +49,15 @@ export default function AuditLogs() {
   }
 
   return (
-    <div className="bg-background text-on-surface min-h-screen pb-16">
-      <header className="border-b border-outline-variant/20 bg-surface-container-lowest/80 backdrop-blur-md sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+    <div className="min-h-dvh bg-surface text-on-surface pb-16">
+      <header className="fixed top-0 z-50 w-full border-b border-white/10 bg-white/80 shadow-sm shadow-blue-900/5 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-8 max-w-[1440px]">
           <div>
-            <Link to="/" className="text-sm font-semibold text-primary hover:underline">
+            <Link to="/dashboard" className="text-sm font-semibold text-primary hover:underline">
               ← Dashboard
             </Link>
-            <h1 className="text-2xl font-extrabold tracking-tight mt-1">Audit log</h1>
-            <p className="text-sm text-on-surface-variant mt-0.5">
+            <h1 className="text-xl font-extrabold tracking-tight mt-0.5">Audit Log</h1>
+            <p className="text-xs text-on-surface-variant mt-0.5">
               Recent changes (profiles, inventory, purchase orders). Admin only.
             </p>
           </div>
@@ -63,7 +71,19 @@ export default function AuditLogs() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="mx-auto w-full max-w-[1600px] px-2 pb-10 pt-[4.4rem] sm:px-3 lg:px-4">
+        <section className="px-1 py-2 sm:px-2">
+          <div className="relative mx-auto w-full overflow-hidden rounded-[2rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
+            <Link
+              to="/system-settings"
+              className="absolute right-5 top-5 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full border border-outline-variant/20 bg-white/90 text-on-surface-variant shadow-sm transition-all hover:border-error/20 hover:bg-white hover:text-error"
+              aria-label="Close"
+              title="Close"
+            >
+              <span className="material-symbols-outlined text-[20px]">close</span>
+            </Link>
+            <section className="relative min-h-0 overflow-auto bg-transparent p-4 sm:p-6 lg:p-8">
+              <div className="mx-auto max-w-[1180px] space-y-6">
         {error ? (
           <div className="rounded-xl bg-error-container text-on-error-container p-4 text-sm mb-6">
             <p className="font-semibold">Could not load audit log</p>
@@ -122,6 +142,33 @@ export default function AuditLogs() {
             </table>
           </div>
         </div>
+              <div className="flex items-center justify-between rounded-xl border border-outline-variant/15 bg-surface-container-low px-4 py-3">
+                <p className="text-sm text-on-surface-variant">
+                  Page {page}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => load(page - 1)}
+                    disabled={loading || page <= 1}
+                    className="rounded-full border border-outline-variant/20 px-4 py-1.5 text-sm font-semibold text-on-surface transition hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => load(page + 1)}
+                    disabled={loading || !hasMore}
+                    className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-on-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+              </div>
+            </section>
+          </div>
+        </section>
       </main>
     </div>
   );
