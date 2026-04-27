@@ -5,6 +5,9 @@ import { normalizeRole } from '../lib/roleAccess'
 
 /** Max wait for Supabase before we unblock the UI (avoids infinite white screen on slow/504 API). */
 const PROFILE_LOAD_TIMEOUT_MS = 12000
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787'
+const SYNC_TIMEOUT_MS = 2500
+let warnedExternalSyncOffline = false
 
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -30,10 +33,45 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  const mapExternalUserToProfile = useCallback((row, authUser) => {
+    if (!row) return null
+    return {
+      id: row.id ?? authUser?.id ?? null,
+      email: row.email ?? authUser?.email ?? null,
+      first_name: row.first_name ?? '',
+      last_name: row.last_name ?? '',
+      avatar_url: row.avatar_url ?? null,
+      role_name: normalizeRole(row.role_name) ?? null,
+      organization_id: row.organization_id ?? null,
+      organization_name: row.organization_name ?? null,
+      is_active: true,
+      source: 'external_postgres',
+    }
+  }, [])
+
   const loadProfile = useCallback(async (authUser) => {
     if (!authUser) {
       setProfile(null)
-      return
+      return null
+    }
+
+    // PostgreSQL-first auth context: role/org checks come from external DB users table.
+    try {
+      const externalRes = await withTimeout(
+        supabase
+          .from('users')
+          .select('id,email,first_name,last_name,avatar_url,role_name,organization_id,organization_name')
+          .eq('id', authUser.id)
+          .maybeSingle(),
+        6000
+      )
+      if (!externalRes?.error && externalRes?.data) {
+        const mapped = mapExternalUserToProfile(externalRes.data, authUser)
+        setProfile(mapped)
+        return mapped
+      }
+    } catch {
+      // continue to legacy profile source for backward compatibility
     }
 
     let data
@@ -47,18 +85,18 @@ export function AuthProvider({ children }) {
       error = res.error
     } catch {
       setProfile(null)
-      return
+      return null
     }
 
     if (error) {
       console.error('profiles load failed:', error.message ?? error)
       setProfile(null)
-      return
+      return null
     }
 
     if (!data) {
       setProfile(null)
-      return
+      return null
     }
 
     let roleName = null
@@ -84,11 +122,48 @@ export function AuthProvider({ children }) {
       // keep partial profile
     }
 
-    setProfile({
+    const resolvedProfile = {
       ...data,
       organization_name: orgName,
       role_name: roleName,
-    })
+    }
+    setProfile(resolvedProfile)
+    return resolvedProfile
+  }, [mapExternalUserToProfile])
+
+  const syncUserToExternalDb = useCallback(async (authUser, loadedProfile = null) => {
+    if (!authUser?.id) return
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS)
+      await fetch(`${API_BASE_URL}/api/auth/sync-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          user: {
+            id: authUser.id,
+            email: authUser.email ?? null,
+          },
+          profile: loadedProfile
+            ? {
+                first_name: loadedProfile.first_name ?? null,
+                last_name: loadedProfile.last_name ?? null,
+                avatar_url: loadedProfile.avatar_url ?? null,
+                role_name: normalizeRole(loadedProfile.role_name) ?? null,
+                organization_id: loadedProfile.organization_id ?? null,
+                organization_name: loadedProfile.organization_name ?? null,
+              }
+            : null,
+        }),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer))
+      warnedExternalSyncOffline = false
+    } catch (error) {
+      if (!warnedExternalSyncOffline) {
+        warnedExternalSyncOffline = true
+        console.warn('external-db user sync failed:', error?.message ?? error)
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -102,13 +177,20 @@ export function AuthProvider({ children }) {
 
       setLoading(true)
       // Never hang forever: unblock shell after PROFILE_LOAD_TIMEOUT_MS even if profile fetch stalls.
-      void Promise.race([loadProfile(authUser), delay(PROFILE_LOAD_TIMEOUT_MS)]).finally(() => {
-        setLoading(false)
-      })
+      void Promise.race([loadProfile(authUser), delay(PROFILE_LOAD_TIMEOUT_MS)])
+        .then((loadedProfile) => syncUserToExternalDb(authUser, loadedProfile))
+        .finally(() => {
+          setLoading(false)
+        })
     })
 
     return () => subscription.unsubscribe()
-  }, [loadProfile])
+  }, [loadProfile, syncUserToExternalDb])
+
+  useEffect(() => {
+    if (!user?.id) return
+    void syncUserToExternalDb(user, profile)
+  }, [user, profile, syncUserToExternalDb])
 
   const login = async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({

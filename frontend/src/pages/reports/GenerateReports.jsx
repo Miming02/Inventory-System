@@ -601,11 +601,10 @@ export default function GenerateReports() {
   const reportCards = useMemo(
     () => [
       { key: "purchase_orders", title: "PO List", icon: "assignment", count: poRows.length },
-      { key: "receive_items", title: "Inventory Received List", icon: "inventory", count: receiveRows.length },
-      { key: "transfer_items", title: "Transfer Items", icon: "swap_horiz", count: transferRows.length },
-      { key: "deliveries", title: "Deliveries", icon: "local_shipping", count: deliveryRows.length },
-      { key: "stock_counts", title: "Stock Count List", icon: "checklist", count: countRows.length },
-      { key: "disposal_requests", title: "Disposal Requests", icon: "delete_sweep", count: disposeRows.length },
+      { key: "receive_items", title: "Received List", icon: "inventory", count: receiveRows.length },
+      { key: "transfer_items", title: "Transfer List", icon: "swap_horiz", count: transferRows.length },
+      { key: "deliveries", title: "Delivery List", icon: "local_shipping", count: deliveryRows.length },
+      { key: "disposal_requests", title: "Disposal Report", icon: "delete_sweep", count: disposeRows.length },
     ],
     [countRows.length, deliveryRows.length, disposeRows.length, poRows.length, receiveRows.length, transferRows.length]
   );

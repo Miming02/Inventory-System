@@ -69,6 +69,7 @@ function asPendingLabel(rawStatus) {
   const s = String(rawStatus || "").toLowerCase();
   if (s === "sent") return "Pending Approval";
   if (s.includes("pending")) return "Pending Approval";
+  if (s === "requested") return "Requested";
   if (s === "completed") return "Completed";
   if (s === "discrepancies_found") return "Discrepancies Found";
   if (s === "scheduled") return "Scheduled";
@@ -120,7 +121,7 @@ export default function ApprovalsPage() {
         supabase
           .from("stock_transfers")
           .select("id,transfer_number,status,created_at,from_location,to_location,created_by,profiles!stock_transfers_created_by_fkey(first_name,last_name,email)")
-          .eq("status", "pending")
+          .in("status", ["pending", "requested"])
           .order("created_at", { ascending: false })
           .limit(60),
         supabase
@@ -461,8 +462,8 @@ export default function ApprovalsPage() {
             if (transferRes.error) throw transferRes.error;
             if (itemRes.error) throw itemRes.error;
             const transfer = transferRes.data;
-            if (!transfer || String(transfer.status || "").toLowerCase() !== "pending") {
-              throw new Error("Transfer is no longer pending approval.");
+            if (!transfer || (String(transfer.status || "").toLowerCase() !== "pending" && String(transfer.status || "").toLowerCase() !== "requested")) {
+              throw new Error("Transfer is no longer pending approval or requested.");
             }
             const movements = [];
             for (const item of itemRes.data || []) {

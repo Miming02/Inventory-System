@@ -79,35 +79,81 @@ export default function ManageLocations() {
       setLoadError(getErrorMessage(locRes.error));
       setRows([]);
     } else {
-      const grouped = new Map();
-      for (const row of locRes.data ?? []) {
-        const loc = (row.location || "").trim();
-        if (!loc) continue;
-        if (!grouped.has(loc)) {
-          grouped.set(loc, {
-            name: loc,
-            itemIds: new Set(),
-            totalQty: 0,
-            updatedAt: row.updated_at || null,
-          });
+      const locRows = locRes.data ?? [];
+      if (locRows.length === 0) {
+        // If per-location table exists but has no rows yet, use legacy locations so UI is not empty.
+        setUseLegacyLocations(true);
+        const legacyRes = await supabase
+          .from("inventory_items")
+          .select("id,location,current_stock,updated_at")
+          .not("location", "is", null)
+          .order("location", { ascending: true })
+          .limit(5000);
+        if (legacyRes.error) {
+          setLoadError(getErrorMessage(legacyRes.error));
+          setRows([]);
+        } else {
+          const grouped = new Map();
+          for (const row of legacyRes.data ?? []) {
+            const loc = (row.location || "").trim();
+            if (!loc) continue;
+            if (!grouped.has(loc)) {
+              grouped.set(loc, {
+                name: loc,
+                itemIds: new Set(),
+                totalQty: 0,
+                updatedAt: row.updated_at || null,
+              });
+            }
+            const entry = grouped.get(loc);
+            entry.itemIds.add(row.id);
+            entry.totalQty += Number(row.current_stock ?? 0);
+            if (!entry.updatedAt || (row.updated_at && new Date(row.updated_at) > new Date(entry.updatedAt))) {
+              entry.updatedAt = row.updated_at;
+            }
+          }
+          setRows(
+            [...grouped.values()]
+              .map((row) => ({
+                name: row.name,
+                itemCount: row.itemIds.size,
+                totalQty: row.totalQty,
+                updatedAt: row.updatedAt,
+              }))
+              .sort((a, b) => a.name.localeCompare(b.name))
+          );
         }
-        const entry = grouped.get(loc);
-        entry.itemIds.add(row.item_id);
-        entry.totalQty += Number(row.quantity ?? 0);
-        if (!entry.updatedAt || (row.updated_at && new Date(row.updated_at) > new Date(entry.updatedAt))) {
-          entry.updatedAt = row.updated_at;
+      } else {
+        const grouped = new Map();
+        for (const row of locRows) {
+          const loc = (row.location || "").trim();
+          if (!loc) continue;
+          if (!grouped.has(loc)) {
+            grouped.set(loc, {
+              name: loc,
+              itemIds: new Set(),
+              totalQty: 0,
+              updatedAt: row.updated_at || null,
+            });
+          }
+          const entry = grouped.get(loc);
+          entry.itemIds.add(row.item_id);
+          entry.totalQty += Number(row.quantity ?? 0);
+          if (!entry.updatedAt || (row.updated_at && new Date(row.updated_at) > new Date(entry.updatedAt))) {
+            entry.updatedAt = row.updated_at;
+          }
         }
+        setRows(
+          [...grouped.values()]
+            .map((row) => ({
+              name: row.name,
+              itemCount: row.itemIds.size,
+              totalQty: row.totalQty,
+              updatedAt: row.updatedAt,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
       }
-      setRows(
-        [...grouped.values()]
-          .map((row) => ({
-            name: row.name,
-            itemCount: row.itemIds.size,
-            totalQty: row.totalQty,
-            updatedAt: row.updatedAt,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
     }
     if (!itemsRes.error) setItemOptions(itemsRes.data ?? []);
     setLoading(false);

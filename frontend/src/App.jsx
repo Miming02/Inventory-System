@@ -17,7 +17,7 @@ import ManageBomAndConversions from "./pages/admin/ManageBomAndConversions";
 import SystemSettings from "./pages/admin/SystemSettings";
 import BomManagement from "./pages/bom/BomManagement";
 import LandingPage from "./pages/public/LandingPage";
-import ConsumeInventory from "./pages/consume/ConsumeInventory";
+import ProduceInventory from "./pages/produce/ProduceInventory";
 import ApprovalsPage from "./pages/approvals/ApprovalsPage";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { canAccessPath } from "./lib/roleAccess";
@@ -210,11 +210,21 @@ export default function App() {
           }
         />
         <Route
+          path="/produce"
+          element={
+            <ProtectedRoute>
+              <RoleGuard>
+                <ProduceInventory />
+              </RoleGuard>
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/consume"
           element={
             <ProtectedRoute>
               <RoleGuard>
-                <ConsumeInventory />
+                <ProduceInventory />
               </RoleGuard>
             </ProtectedRoute>
           }

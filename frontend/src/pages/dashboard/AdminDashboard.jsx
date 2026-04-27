@@ -114,7 +114,7 @@ const expeditedOperations = [
     icon: "precision_manufacturing",
     title: "Produce",
     text: "Produce finished goods and automatically deduct components based on BOM.",
-    to: "/consume"
+    to: "/produce"
   }
 ];
 
@@ -154,6 +154,8 @@ const chartBars = [
   { track: "h-[55%]", fill: "h-[75%]" },
   { track: "h-[90%]", fill: "h-[65%]" }
 ];
+
+const SHOW_ADVANCED_DASHBOARD_SECTIONS = false;
 
 function profileDisplayName(p) {
   if (!p) return "Team member";
@@ -300,6 +302,13 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     let cancelled = false;
+    if (!SHOW_ADVANCED_DASHBOARD_SECTIONS) {
+      setCards(overviewCards);
+      setLiveLedgerLogs([]);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const loadDashboardData = async () => {
       const r = normalizeRole(role);
@@ -605,7 +614,7 @@ export default function AdminDashboard() {
           supabase
             .from("stock_transfers")
             .select("id", { count: "exact", head: false })
-            .eq("status", "pending")
+            .in("status", ["pending", "requested"])
             .limit(0),
           supabase
             .from("purchase_orders")

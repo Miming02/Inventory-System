@@ -69,6 +69,7 @@ function profileDisplayName(profile) {
 
 export default function TransferInventory() {
   const { profile, role } = useAuth();
+  const [operationType, setOperationType] = useState(null);
   const [entryStep, setEntryStep] = useState("select");
   const [activeEntryMode, setActiveEntryMode] = useState("scan");
   const [transferSuccess, setTransferSuccess] = useState(null);
@@ -169,7 +170,7 @@ export default function TransferInventory() {
         }
       }
 
-      const targetStatus = submitIntent === "draft" ? "draft" : "pending";
+      const targetStatus = submitIntent === "draft" ? "draft" : (operationType === "request" ? "requested" : "pending");
 
       for (const row of normalizedQueue) {
         const transferNumber = String(row.referenceNo || "").trim() || `TR-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -205,7 +206,7 @@ export default function TransferInventory() {
 
       setTransferSuccess({ lineCount, unitCount, workflowStatus: targetStatus });
     },
-    [profile?.id]
+    [profile?.id, operationType]
   );
 
   useEffect(() => {
@@ -272,10 +273,10 @@ export default function TransferInventory() {
       </header>
 
       <main className="mx-auto w-full max-w-[1500px] px-2 pb-4 pt-[4.2rem] sm:px-3 lg:px-4">
-        <section className={`${entryStep === "select" ? "min-h-[calc(100dvh-4.8rem)] flex items-center justify-center" : "py-1"}`}>
-          <div className={`relative mx-auto overflow-hidden rounded-[1.4rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)] ${entryStep === "select" ? "w-full max-w-[1040px]" : "w-full"}`}>
-            <div className={entryStep === "select" ? "min-h-[calc(100dvh-14rem)]" : "min-h-[calc(100dvh-5.2rem)]"}>
-              {entryStep === "select" ? (
+        <section className={`${(operationType === null || entryStep === "select") ? "min-h-[calc(100dvh-4.8rem)] flex items-center justify-center" : "py-1"}`}>
+          <div className={`relative mx-auto overflow-hidden rounded-[1.4rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)] ${(operationType === null || entryStep === "select") ? "w-full max-w-[1040px]" : "w-full"}`}>
+            <div className={(operationType === null || entryStep === "select") ? "min-h-[calc(100dvh-14rem)]" : "min-h-[calc(100dvh-5.2rem)]"}>
+              {operationType === null ? (
                 <div className="flex h-full flex-col">
                   <div className="relative bg-primary px-6 py-6 text-center text-white">
                     <Link
@@ -286,8 +287,59 @@ export default function TransferInventory() {
                     >
                       <span className="material-symbols-outlined text-[16px]">close</span>
                     </Link>
-                    <h2 className="text-3xl font-black font-headline tracking-tight">Transfer Inventory</h2>
-                    <p className="mt-2 text-sm text-white/90">Select a method to transfer items</p>
+                    <h2 className="text-3xl font-black font-headline tracking-tight">Transfer Operations</h2>
+                    <p className="mt-2 text-sm text-white/90">Select an operation to perform</p>
+                  </div>
+                  <div className="flex-1 min-h-0 p-5 sm:p-6 grid place-items-center">
+                    <div className="mx-auto grid w-full max-w-3xl translate-y-8 md:translate-y-10 grid-cols-1 gap-4 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setOperationType("transfer")}
+                        className="group rounded-2xl border border-slate-200/80 bg-white p-6 text-center shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_14px_30px_rgba(59,130,246,0.12)]"
+                      >
+                        <span className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
+                          <span className="material-symbols-outlined text-[32px]">sync_alt</span>
+                        </span>
+                        <span className="block text-xl font-bold text-slate-900 dark:text-white">Transfer Item</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOperationType("request")}
+                        className="group rounded-2xl border border-slate-200/80 bg-white p-6 text-center shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_14px_30px_rgba(59,130,246,0.12)]"
+                      >
+                        <span className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400">
+                          <span className="material-symbols-outlined text-[32px]">move_to_inbox</span>
+                        </span>
+                        <span className="block text-xl font-bold text-slate-900 dark:text-white">Request Item</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : entryStep === "select" ? (
+                <div className="flex h-full flex-col">
+                  <div className="relative bg-primary px-6 py-6 text-center text-white">
+                    <button
+                      onClick={() => setOperationType(null)}
+                      className="absolute left-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition-all hover:bg-white/20"
+                      aria-label="Back to operations"
+                      title="Back"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                    </button>
+                    <Link
+                      to="/dashboard"
+                      className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition-all hover:bg-white/20"
+                      aria-label="Close transfer page"
+                      title="Close"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </Link>
+                    <h2 className="text-3xl font-black font-headline tracking-tight">
+                      {operationType === 'transfer' ? 'Transfer Inventory' : 'Request Inventory'}
+                    </h2>
+                    <p className="mt-2 text-sm text-white/90">
+                      Select a method to {operationType === 'transfer' ? 'transfer' : 'request'} items
+                    </p>
                   </div>
                   <div className="flex-1 min-h-0 p-5 sm:p-6 grid place-items-center">
                     <div className="mx-auto grid w-full max-w-5xl translate-y-8 md:translate-y-10 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -335,17 +387,17 @@ export default function TransferInventory() {
                   </div>
                   {activeEntryMode === "scan" ? (
                     <div className="flex-1 min-h-0">
-                      <TransferScanModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} />
+                      <TransferScanModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} operationType={operationType} />
                     </div>
                   ) : null}
                   {activeEntryMode === "manual" ? (
                     <div className="flex-1 min-h-0">
-                      <TransferManualModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} />
+                      <TransferManualModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} operationType={operationType} />
                     </div>
                   ) : null}
                   {activeEntryMode === "batch" ? (
                     <div className="flex-1 min-h-0">
-                      <TransferBatchModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} />
+                      <TransferBatchModal open inline onClose={() => {}} onReviewDone={onManualTransferReviewDone} operationType={operationType} />
                     </div>
                   ) : null}
                 </div>
@@ -367,7 +419,7 @@ export default function TransferInventory() {
             </div>
             <div className="min-w-0 flex-1 pt-0.5">
               <p className="font-bold text-sm text-on-surface font-headline">
-                {transferSuccess.workflowStatus === "draft" ? "Transfer saved as draft" : "Transfer submitted for approval"}
+                {transferSuccess.workflowStatus === "draft" ? "Saved as draft" : transferSuccess.workflowStatus === "requested" ? "Request submitted" : "Transfer submitted for approval"}
               </p>
               <p className="text-xs text-on-surface-variant mt-1">
                 {transferSuccess.lineCount} line{transferSuccess.lineCount === 1 ? "" : "s"} · {transferSuccess.unitCount} unit

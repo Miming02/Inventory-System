@@ -3,8 +3,8 @@
 **Document ID:** BRD-INV-001  
 **System name:** The Fluid Curator Inventory System (working title; same product as `database-schema.md` header)  
 **Version:** 1.0  
-**Scope:** Web application for inventory, procurement, warehouse operations, and role-based administration backed by Supabase (PostgreSQL).  
-**Authoritative implementation references:** `frontend/src/App.jsx`, `frontend/src/lib/roleAccess.js`, `backend/supabase/migrations/001_inventory_setup.sql`, `backend/supabase/migrations/008_multi_tenancy.sql`, `supabase/functions/invite-user/index.ts`, `database-schema.md` (logical model; physical auth uses `auth.users` + `public.profiles` per migration notes).  
+**Scope:** Web application for inventory, procurement, warehouse operations, and role-based administration backed by PostgreSQL with Supabase for auth and invites.  
+**Authoritative implementation references:** `frontend/src/App.jsx`, `frontend/src/lib/roleAccess.js`, `backend/future/node-bff/src/server.js`, `supabase/functions/invite-user/index.ts`, `database-schema.md`.  
 **Process index:** [docs/README.md](./README.md) · [Checklist 0.1–0.7 ↔ repo](./CHECKLIST_COMPLIANCE.md)
 
 ---

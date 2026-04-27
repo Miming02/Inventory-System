@@ -6,7 +6,7 @@
 **Companion:** `docs/SYSTEM_REQUIREMENTS.md` (BRD)  
 **Process index:** [docs/README.md](./README.md) · [Checklist compliance](./CHECKLIST_COMPLIANCE.md) · [Developer setup](./DEVELOPER_SETUP.md)
 
-This document replaces informal or aspirational descriptions elsewhere: the **implemented** system is **Supabase-first**. Any Node “modular monolith” tree described historically is **optional future** work (see appendix).
+This document replaces informal or aspirational descriptions elsewhere: the implemented system uses PostgreSQL via a Node BFF, while Supabase remains for Auth and invites.
 
 ---
 
@@ -63,7 +63,7 @@ This document replaces informal or aspirational descriptions elsewhere: the **im
 
 | Area | Location | Notes |
 |------|----------|--------|
-| Schema + RLS + triggers | `backend/supabase/migrations/001_inventory_setup.sql` | Source of truth for DDL; copy also in `supabase-setup.sql` |
+| Schema + RLS + triggers | External PostgreSQL schema (managed outside this repo) | Source of truth for tables/triggers now lives in your active Postgres environment |
 | Edge Function | `supabase/functions/invite-user/index.ts` | Admin invite; verifies JWT; uses service role server-side |
 | Logical ERD narrative | `database-schema.md` | Documents domains; note `profiles` + `auth.users` supersede older `users` narrative where they differ |
 
@@ -142,7 +142,7 @@ There is **no** custom Node HTTP server in this repository. Client integration u
 
 - **Horizontal scale:** Supabase scales managed Postgres and connection pooling; client is stateless SPA.  
 - **Security:** Secrets (`service_role`, etc.) only on server (Edge Function env); browser uses **anon** key + user JWT.  
-- **Schema evolution:** Use Supabase migrations (`backend/supabase/migrations/`) for repeatable environments.
+- **Schema evolution:** Use your PostgreSQL migration workflow tied to `backend/future/node-bff`.
 
 ---
 

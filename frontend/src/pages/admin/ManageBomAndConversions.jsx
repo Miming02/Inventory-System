@@ -76,7 +76,7 @@ export default function ManageBomAndConversions() {
       supabase.from("inventory_items").select("id,name,sku,item_type,unit_of_measure,is_active").order("name"),
       supabase
         .from("boms")
-        .select("id,name,code,finished_good_item_id,output_quantity,output_unit,status,version,created_at")
+        .select("id,name,finished_good_item_id,output_quantity,output_unit,status,version,created_at")
         .order("created_at", { ascending: false })
         .limit(200),
       supabase
@@ -149,7 +149,6 @@ export default function ManageBomAndConversions() {
     }
     const payload = {
       name: bomForm.name.trim(),
-      code: bomForm.code.trim() || null,
       finished_good_item_id: fgId,
       output_quantity: Number(bomForm.output_quantity || 1),
       output_unit: bomForm.output_unit.trim() || "unit",

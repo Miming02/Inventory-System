@@ -41,7 +41,7 @@ export function normalizeRole(role) {
  * - Procurement Staff: suppliers, POs, incoming deliveries
  * - Management: reports/analytics, monitor stock and operations (read-focused)
  *
- * DB `roles.name` must match these strings (see `backend/supabase/migrations/001_inventory_setup.sql` seeds).
+ * DB `roles.name` must match these strings.
  */
 
 /** @type {Record<string, string[]>} path -> roles allowed (Admin always allowed in canAccessPath) */
@@ -57,6 +57,7 @@ const PATH_ROLES = {
   "/transfer": ["Admin", "Warehouse Staff", "Production Staff"],
   "/deliver": ["Admin", "Warehouse Staff", "Production Staff"],
   "/consume": ["Admin", "Production Staff", "Warehouse Staff"],
+  "/produce": ["Admin", "Production Staff", "Warehouse Staff"],
   "/count": ["Admin", "Warehouse Staff"],
   "/dispose": ["Admin", "Warehouse Staff"],
   "/purchase-orders": ["Admin", "Procurement Staff", "Management"],

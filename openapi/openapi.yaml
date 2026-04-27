@@ -12,7 +12,7 @@ info:
       `Authorization: Bearer {access_token}`.  
     - **Edge:** Function paths are prefixed with `/functions/v1`.
 
-    Table DDL: `backend/supabase/migrations/001_inventory_setup.sql`.  
+    Table DDL: external PostgreSQL schema managed outside this repository.  
     BRD / architecture: `docs/SYSTEM_REQUIREMENTS.md`, `docs/SYSTEM_ARCHITECTURE.md`.
 
 servers:

@@ -38,6 +38,12 @@ function parseCsvText(csvText) {
   });
 }
 
+function asMoney(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return "0.00";
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 async function parseBatchFile(file) {
   const name = String(file?.name || "").toLowerCase();
   if (name.endsWith(".csv")) {
@@ -69,6 +75,49 @@ function useModalA11y(open, onClose) {
       document.removeEventListener("keydown", onKey);
     };
   }, [open, onClose]);
+}
+
+function RenderSafeSelect({
+  value,
+  onChange,
+  options,
+  placeholder = "Select...",
+  wrapperClassName = "",
+  inputClassName = "",
+}) {
+  const normalizedOptions = Array.isArray(options) ? options : [];
+  const selectedLabel =
+    normalizedOptions.find((opt) => String(opt.value) === String(value))?.label ??
+    (value ? String(value) : "");
+
+  return (
+    <div className={`relative ${wrapperClassName}`}>
+      <input
+        readOnly
+        value={selectedLabel}
+        placeholder={placeholder}
+        className={`pointer-events-none w-full ${inputClassName}`}
+      />
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-500">
+        <span className="material-symbols-outlined text-[16px]">expand_more</span>
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      >
+        <option value="">{placeholder}</option>
+        {value && !normalizedOptions.some((opt) => String(opt.value) === String(value)) ? (
+          <option value={value}>{value}</option>
+        ) : null}
+        {normalizedOptions.map((opt) => (
+          <option key={`${opt.value}`} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 export function DeliverScanModal({ open, onClose, onReviewDone, inline = false, compact = false }) {
@@ -279,14 +328,13 @@ export function DeliverScanModal({ open, onClose, onReviewDone, inline = false, 
                 <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary/60">Routing & Date</h3>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">Ship-From Location (Optional)</label>
-                  <select value={shipFrom} onChange={(e) => setShipFrom(e.target.value)} className="w-full h-8 rounded-lg px-2.5 text-sm bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/20 appearance-none">
-                    <option value="">Select...</option>
-                    {locations.map((loc) => (
-                      <option key={`dscan-from-${loc}`} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
+                  <RenderSafeSelect
+                    value={shipFrom}
+                    onChange={setShipFrom}
+                    placeholder="Select..."
+                    options={locations.map((loc) => ({ value: loc, label: loc }))}
+                    inputClassName="h-8 rounded-lg px-2.5 text-sm text-slate-900 bg-white border border-slate-200 focus:ring-2 focus:ring-primary/20"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">Location/Delivery Address (Optional)</label>
@@ -413,7 +461,7 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
     Promise.all([
       supabase
         .from("inventory_items")
-        .select("id,sku,name,current_stock,unit_of_measure,is_active,location")
+        .select("id,sku,name,current_stock,unit_of_measure,is_active,location,unit_cost")
         .order("name", { ascending: true })
         .limit(1000),
       supabase
@@ -504,7 +552,7 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
         const items = itemsData
           .filter((row) => row?.sku)
           .filter((row) => row.is_active !== false)
-          .filter((row) => availableIds.has(String(row.id)));
+          .filter((row) => availableIds.has(String(row.id)) || Number(row.current_stock ?? 0) > 0);
         setSkuOptions(items);
         return;
       }
@@ -623,6 +671,28 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
     }
     return options;
   }, [availableSkuOptions, hasLocationStockData, itemStockByLocation, locations, queue, selectedItemStockByLocation, skuValue]);
+
+  const shipFromOptionEntries = useMemo(() => {
+    const sku = String(skuValue || "").trim().toLowerCase();
+    const selected = availableSkuOptions.find((opt) => String(opt.sku || "").toLowerCase() === sku);
+    return shipFromOptions.map((loc) => {
+      const availableQty =
+        selectedItemStockByLocation.size > 0
+          ? Number(selectedItemStockByLocation.get(loc) ?? 0)
+          : selected?.id
+            ? Number(itemStockByLocation.get(`${selected.id}::${loc}`) ?? 0)
+            : 0;
+      const queuedQty = selected?.id
+        ? queue
+            .filter((row) => row.itemId === selected.id && row.shipFrom === loc)
+            .reduce((sum, row) => sum + Number(row.quantity ?? 0), 0)
+        : 0;
+      return {
+        location: loc,
+        available: Math.max(0, availableQty - queuedQty),
+      };
+    });
+  }, [availableSkuOptions, itemStockByLocation, queue, selectedItemStockByLocation, shipFromOptions, skuValue]);
 
   useEffect(() => {
     if (!shipFrom) return;
@@ -761,6 +831,7 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
       return;
     }
     setQueue((q) => {
+      const unitCost = Number(matched.unit_cost ?? 0);
       const next = [
         ...q,
         {
@@ -770,6 +841,8 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
           itemName: itemName.trim() || matched.name || sku,
           quantity: qty,
           unit: unitValue,
+          costBasis: Number.isFinite(unitCost) ? unitCost : 0,
+          inventoryValue: Number.isFinite(unitCost) ? unitCost * qty : 0,
           customerName: customer,
           referenceNo: referenceNo.trim(),
           shipFrom,
@@ -809,6 +882,7 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
   };
 
   const queueTotalQty = queue.reduce((acc, row) => acc + row.quantity, 0);
+  const queueTotalValue = queue.reduce((acc, row) => acc + Number(row.inventoryValue ?? 0), 0);
   const queuePageCount = Math.max(1, Math.ceil(queue.length / MANUAL_PAGE_SIZE));
   const pagedQueue = useMemo(() => {
     const start = (queuePage - 1) * MANUAL_PAGE_SIZE;
@@ -888,11 +962,8 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                       <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">Item</th>
                       <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">Qty</th>
                       <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">Unit</th>
-                      <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">Customer</th>
-                      <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">From</th>
-                      <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">Destination</th>
-                      <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">Date</th>
-                      <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant">Carrier</th>
+                      <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant text-right">Cost Basis</th>
+                      <th className="px-3 py-3 text-[10px] font-bold uppercase text-on-surface-variant text-right">Inventory Value</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-outline-variant/10">
@@ -904,15 +975,8 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                         </td>
                         <td className="px-3 py-3 font-semibold">{row.quantity}</td>
                         <td className="px-3 py-3 text-xs text-on-surface-variant whitespace-nowrap">{row.unit}</td>
-                        <td className="px-3 py-3 text-xs max-w-[100px] truncate">{row.customerName}</td>
-                        <td className="px-3 py-3 text-xs text-on-surface-variant max-w-[120px] truncate" title={row.shipFrom}>
-                          {row.shipFrom}
-                        </td>
-                        <td className="px-3 py-3 text-xs text-on-surface-variant max-w-[120px] truncate" title={row.shipTo}>
-                          {row.shipTo}
-                        </td>
-                        <td className="px-3 py-3 text-xs whitespace-nowrap">{row.deliveryDate || "—"}</td>
-                        <td className="px-3 py-3 text-xs max-w-[100px] truncate">{row.deliveredBy || "—"}</td>
+                        <td className="px-3 py-3 text-right text-xs whitespace-nowrap">₱ {asMoney(row.costBasis)}</td>
+                        <td className="px-3 py-3 text-right text-xs font-semibold whitespace-nowrap">₱ {asMoney(row.inventoryValue)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -963,10 +1027,19 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                 <div className="mb-1.5 grid grid-cols-1 gap-1 md:grid-cols-4">
                   <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
                     <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Ship-From</label>
-                    <select value={shipFrom} onChange={(e) => { setShipFrom(e.target.value); setFormError(""); }} className="h-5 w-full appearance-none rounded-md border-none bg-white px-1.5 text-[10px]">
-                      <option value="">Select...</option>
-                      {shipFromOptions.map((loc) => <option key={`dmf-${loc}`} value={loc}>{loc}</option>)}
-                    </select>
+                    <RenderSafeSelect
+                      value={shipFrom}
+                      onChange={(next) => {
+                        setShipFrom(next);
+                        setFormError("");
+                      }}
+                      placeholder={skuValue ? "Select source location..." : "Select SKU first..."}
+                      options={shipFromOptionEntries.map((entry) => ({
+                        value: entry.location,
+                        label: `${entry.location} - ${entry.available}`,
+                      }))}
+                      inputClassName="h-5 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-900"
+                    />
                   </div>
                   <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
                     <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Delivery Address</label>
@@ -983,15 +1056,15 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-slate-200">
                   <div className="h-full min-h-[260px] overflow-x-auto overflow-y-hidden">
-                    <table className="w-full min-w-[920px] table-fixed text-left text-[10px]">
+                    <table className="w-full min-w-[980px] table-fixed text-left text-[10px]">
                       <thead className="sticky top-0 z-10 bg-slate-100">
                         <tr>
-                          <th className="w-[16%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">SKU-Code</th>
-                          <th className="w-[16%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Item Name</th>
+                          <th className="w-[18%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">SKU-Code</th>
+                          <th className="w-[24%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Item Name</th>
                           <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">UOM</th>
                           <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center">Quantity</th>
-                          <th className="w-[16%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Delivered By</th>
-                          <th className="w-[14%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Reference</th>
+                          <th className="w-[12%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-right">Cost Basis</th>
+                          <th className="w-[12%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-right">Inventory Value</th>
                           <th className="w-[8%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center">Action</th>
                         </tr>
                       </thead>
@@ -1002,8 +1075,8 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                             <td className="truncate px-2 py-1">{row.itemName}</td>
                             <td className="px-2 py-1">{row.unit}</td>
                             <td className="px-2 py-1 text-center font-semibold">{row.quantity}</td>
-                            <td className="truncate px-2 py-1">{row.deliveredBy || "—"}</td>
-                            <td className="truncate px-2 py-1">{row.referenceNo}</td>
+                            <td className="px-2 py-1 text-right">₱ {asMoney(row.costBasis)}</td>
+                            <td className="px-2 py-1 text-right font-semibold">₱ {asMoney(row.inventoryValue)}</td>
                             <td className="px-2 py-1 text-center">
                               <button type="button" onClick={() => removeQueueLine(row.id)} className="rounded-full p-0.5 hover:bg-slate-100" aria-label={`Remove ${row.sku}`}>
                                 <span className="material-symbols-outlined text-[14px]">delete</span>
@@ -1013,21 +1086,24 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                         ))}
                         <tr className="bg-slate-50/70">
                           <td className="px-1.5 py-1">
-                            <select value={skuValue} onChange={(e) => applySkuSelection(e.target.value)} onKeyDown={handleManualEntryKeyDown} className="h-6 w-full appearance-none rounded-md border-none bg-white px-1.5 text-[10px]">
-                              <option value="">Select SKU...</option>
-                              {availableSkuOptions.map((item) => <option key={item.id} value={item.sku}>{item.sku}</option>)}
-                            </select>
+                            <RenderSafeSelect
+                              value={skuValue}
+                              onChange={applySkuSelection}
+                              placeholder="Select SKU..."
+                              options={availableSkuOptions.map((item) => ({ value: item.sku, label: item.sku }))}
+                              inputClassName="h-6 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-900"
+                            />
                           </td>
                           <td className="px-1.5 py-1"><input value={itemName} onChange={(e) => setItemName(e.target.value)} onKeyDown={handleManualEntryKeyDown} readOnly={itemNameLocked} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" /></td>
                           <td className="px-1.5 py-1"><input value={unit} readOnly onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px] text-slate-800" /></td>
                           <td className="px-1.5 py-1"><input value={quantity} onChange={(e) => setQuantity(e.target.value)} onKeyDown={handleManualEntryKeyDown} type="number" min="1" max={remainingQtyForSelected != null ? remainingQtyForSelected : undefined} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-center text-[10px]" /></td>
-                          <td className="px-1.5 py-1"><input value={deliveredBy} onChange={(e) => setDeliveredBy(e.target.value)} onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" /></td>
-                          <td className="px-1.5 py-1"><input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" /></td>
+                          <td className="px-1.5 py-1 text-right text-[10px] text-on-surface-variant">Auto</td>
+                          <td className="px-1.5 py-1 text-right text-[10px] text-on-surface-variant">Auto</td>
                           <td className="px-1.5 py-1 text-center text-[9px] font-semibold text-primary/80">Enter</td>
                         </tr>
                         {Array.from({ length: Math.max(0, MANUAL_PAGE_SIZE - pagedQueue.length - 1) }).map((_, idx) => (
                           <tr key={`deliver-empty-row-${idx}`} className="bg-white">
-                            <td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-center text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1"></td>
+                            <td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-center text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-right text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-right text-[10px] text-slate-300">—</td><td className="px-2 py-1"></td>
                           </tr>
                         ))}
                       </tbody>
@@ -1036,7 +1112,8 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                           <tr className="sticky bottom-0 z-10 bg-slate-700 text-white">
                             <td className="px-2 py-1.5 text-[10px] font-semibold" colSpan={3}>Totals</td>
                             <td className="px-2 py-1.5 text-center font-semibold">{queueTotalQty}</td>
-                            <td className="px-2 py-1.5" colSpan={2}></td>
+                            <td className="px-2 py-1.5 text-right">—</td>
+                            <td className="px-2 py-1.5 text-right font-semibold">₱ {asMoney(queueTotalValue)}</td>
                             <td className="px-2 py-1.5 text-right"><button type="button" onClick={() => setQueue([])} className="rounded-md bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold text-white hover:bg-white/25">Clear</button></td>
                           </tr>
                         </tfoot>
@@ -1047,6 +1124,7 @@ export function DeliverManualModal({ open, onClose, onReviewDone, inline = false
                 <div className="mt-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-on-surface-variant">Total Quantity: <span className="font-semibold text-on-surface">{queueTotalQty} units</span></span>
+                    <span className="text-[10px] text-on-surface-variant">Total Value: <span className="font-semibold text-on-surface">₱ {asMoney(queueTotalValue)}</span></span>
                     {queue.length > MANUAL_PAGE_SIZE ? (
                       <div className="flex items-center gap-1 text-[9px]">
                         <button type="button" onClick={() => setQueuePage((p) => Math.max(1, p - 1))} disabled={queuePage <= 1} className="h-5 rounded-md bg-slate-100 px-1.5 font-semibold text-slate-700 disabled:opacity-40">Prev</button>
@@ -1272,25 +1350,23 @@ export function DeliverBatchModal({ open, onClose, onReviewDone, inline = false,
                 <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary/60">Delivery Routing</h3>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-widest text-on-surface-variant">Ship-From (Optional)</label>
-                  <select value={shipFrom} onChange={(e) => setShipFrom(e.target.value)} className="w-full h-8 bg-surface-container-highest border-none rounded-lg px-2.5 text-sm appearance-none">
-                    <option value="">Select...</option>
-                    {locations.map((loc) => (
-                      <option key={`dbf-${loc}`} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
+                  <RenderSafeSelect
+                    value={shipFrom}
+                    onChange={setShipFrom}
+                    placeholder="Select..."
+                    options={locations.map((loc) => ({ value: loc, label: loc }))}
+                    inputClassName="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-widest text-on-surface-variant">Delivery Address (Optional)</label>
-                  <select value={shipTo} onChange={(e) => setShipTo(e.target.value)} className="w-full h-8 bg-surface-container-highest border-none rounded-lg px-2.5 text-sm appearance-none">
-                    <option value="">Select...</option>
-                    {locations.map((loc) => (
-                      <option key={`dbt-${loc}`} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
+                  <RenderSafeSelect
+                    value={shipTo}
+                    onChange={setShipTo}
+                    placeholder="Select..."
+                    options={locations.map((loc) => ({ value: loc, label: loc }))}
+                    inputClassName="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900"
+                  />
                 </div>
               </section>
               <section className="rounded-lg border border-outline-variant/20 bg-surface p-2 space-y-1.5">

@@ -1,44 +1,16 @@
 {
-  "strategy": "supabase-first",
-  "migrations_dir": "backend/supabase/migrations",
+  "strategy": "postgresql-node-bff",
+  "service_dir": "backend/future/node-bff",
   "edge_functions_dir": "supabase/functions",
   "modules": [
     {
       "id": "core_inventory",
-      "description": "Catalog, stock movements, transfers, counts, adjustments, POs",
-      "migrations": ["001_inventory_setup.sql"]
+      "description": "Catalog, stock movements, transfers, counts, adjustments, purchase orders"
     },
     {
-      "id": "audit",
-      "description": "Audit log RLS",
-      "migrations": ["002_audit_logs_rls.sql"]
-    },
-    {
-      "id": "notifications",
-      "description": "Notifications RLS",
-      "migrations": ["003_notifications_rls.sql"]
-    },
-    {
-      "id": "storage",
-      "description": "Attachments bucket/policies",
-      "migrations": ["004_storage_attachments.sql"]
-    },
-    {
-      "id": "ops_sql_editor",
-      "description": "Notification helper for SQL editor",
-      "migrations": ["005_create_notification_allow_sql_editor.sql"]
-    },
-    {
-      "id": "seed",
-      "description": "Optional reference seed",
-      "migrations": ["006_seed_reference_data.sql"]
-    },
-    {
-      "id": "operational_rls",
-      "description": "Categories, suppliers, PO line RLS",
-      "migrations": ["007_operational_tables_rls.sql"]
+      "id": "auth_and_invites",
+      "description": "Supabase Auth and invite-user edge function"
     }
   ],
-  "edge_functions": [{ "name": "invite-user", "path": "supabase/functions/invite-user" }],
-  "legacy_bundle": "supabase-setup.sql"
+  "edge_functions": [{ "name": "invite-user", "path": "supabase/functions/invite-user" }]
 }

@@ -3,7 +3,7 @@
 **Backend:** Supabase  
 **Version:** 1.1  
 
-**Source of truth (DDL + RLS):** `backend/supabase/migrations/001_inventory_setup.sql` plus later migrations (notably **`008_multi_tenancy.sql`** for `organizations` and `organization_id`). Keep this document aligned when migrations change.  
+**Source of truth (DDL + RLS):** Active external PostgreSQL schema. Keep this document aligned with your current database changes.  
 **Related:** `docs/SYSTEM_REQUIREMENTS.md`, `docs/SYSTEM_ARCHITECTURE.md`.
 
 ---

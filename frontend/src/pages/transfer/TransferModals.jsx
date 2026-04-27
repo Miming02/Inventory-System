@@ -17,6 +17,15 @@ function buildRequestedByLabel(profile, user) {
   return full || String(user?.email || "").trim() || "—";
 }
 
+function formatMoney(value) {
+  const amount = Number(value ?? 0);
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 function normalizeHeader(value) {
   return String(value || "")
     .trim()
@@ -82,12 +91,57 @@ function useModalA11y(open, onClose) {
   }, [open, onClose]);
 }
 
+function RenderSafeSelect({
+  value,
+  onChange,
+  options,
+  placeholder = "Select...",
+  wrapperClassName = "",
+  inputClassName = "",
+}) {
+  const normalizedOptions = Array.isArray(options) ? options : [];
+  const selectedLabel =
+    normalizedOptions.find((opt) => String(opt.value) === String(value))?.label ??
+    (value ? String(value) : "");
+
+  return (
+    <div className={`relative ${wrapperClassName}`}>
+      <input
+        readOnly
+        value={selectedLabel}
+        placeholder={placeholder}
+        className={`pointer-events-none w-full ${inputClassName}`}
+      />
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-500">
+        <span className="material-symbols-outlined text-[16px]">expand_more</span>
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      >
+        <option value="">{placeholder}</option>
+        {value && !normalizedOptions.some((opt) => String(opt.value) === String(value)) ? (
+          <option value={value}>{value}</option>
+        ) : null}
+        {normalizedOptions.map((opt) => (
+          <option key={`${opt.value}`} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export function TransferScanModal({ open, onClose, onReviewDone, inline = false, compact = false }) {
   const dense = inline || compact;
   useModalA11y(open && !inline, onClose);
   const { user, profile } = useAuth();
   const locations = useDistinctLocations(open);
   const [inventoryOptions, setInventoryOptions] = useState([]);
+  const [itemStockByLocation, setItemStockByLocation] = useState(new Map());
+  const [hasLocationStockData, setHasLocationStockData] = useState(false);
   const [step, setStep] = useState("entry");
   const [skuValue, setSkuValue] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
@@ -121,18 +175,66 @@ export function TransferScanModal({ open, onClose, onReviewDone, inline = false,
     setQueue([]);
     setFormError("");
     setSaving(false);
-    void supabase
-      .from("inventory_items")
-      .select("id,sku,name,unit_of_measure,current_stock,is_active")
-      .neq("is_active", false)
-      .order("name", { ascending: true })
-      .limit(3000)
-      .then(({ data }) => {
-        setInventoryOptions((data ?? []).filter((row) => Number(row.current_stock ?? 0) > 0));
-      });
+    setItemStockByLocation(new Map());
+    setHasLocationStockData(false);
+    void Promise.all([
+      supabase
+        .from("inventory_items")
+        .select("id,sku,name,unit_of_measure,current_stock,is_active")
+        .neq("is_active", false)
+        .order("name", { ascending: true })
+        .limit(3000),
+      supabase
+        .from("inventory_item_locations")
+        .select("item_id,location,quantity")
+        .limit(5000),
+    ]).then(([itemsRes, locRes]) => {
+      const itemsData = itemsRes.data ?? [];
+      if (!locRes.error) {
+        const map = new Map();
+        for (const row of locRes.data ?? []) {
+          const itemId = row.item_id;
+          const loc = String(row.location || "").trim();
+          const qty = Number(row.quantity ?? 0);
+          if (!itemId || !loc || !Number.isFinite(qty) || qty <= 0) continue;
+          const key = `${itemId}::${loc}`;
+          map.set(key, (map.get(key) ?? 0) + qty);
+        }
+        setItemStockByLocation(map);
+        setHasLocationStockData(map.size > 0);
+        const availableIds = new Set();
+        for (const key of map.keys()) {
+          const [itemId] = key.split("::");
+          if (itemId) availableIds.add(itemId);
+        }
+        setInventoryOptions(
+          itemsData.filter(
+            (row) => row?.sku && (availableIds.has(String(row.id)) || Number(row.current_stock ?? 0) > 0)
+          )
+        );
+        return;
+      }
+      setInventoryOptions(itemsData.filter((row) => row?.sku && Number(row.current_stock ?? 0) > 0));
+    });
   }, [open]);
 
   const queueTotalQty = queue.reduce((acc, row) => acc + Number(row.quantity || 0), 0);
+  const selectedScanItem =
+    selectedItem || inventoryOptions.find((opt) => String(opt.sku || "").toLowerCase() === skuValue.trim().toLowerCase()) || null;
+  const scanFromLocationOptions = useMemo(() => {
+    if (!selectedScanItem?.id || !hasLocationStockData) return [];
+    const out = [];
+    for (const loc of locations) {
+      const key = `${selectedScanItem.id}::${loc}`;
+      const availableQty = Number(itemStockByLocation.get(key) ?? 0);
+      const queuedQty = queue
+        .filter((row) => row.itemId === selectedScanItem.id && row.fromLocation === loc)
+        .reduce((sum, row) => sum + Number(row.quantity ?? 0), 0);
+      const remaining = Math.max(0, availableQty - queuedQty);
+      if (remaining > 0) out.push({ location: loc, available: remaining });
+    }
+    return out;
+  }, [hasLocationStockData, itemStockByLocation, locations, queue, selectedScanItem?.id]);
 
   const handleAttachmentSelect = async (file) => {
     if (!user?.id || !file) return;
@@ -160,6 +262,16 @@ export function TransferScanModal({ open, onClose, onReviewDone, inline = false,
     if (!transferBy.trim()) return setFormError("Transfer By is required.");
     if (!requestedBy.trim() || requestedBy === "—") return setFormError("Requested By is required.");
     if (!referenceNo.trim()) return setFormError("Reference No. is required.");
+    if (hasLocationStockData) {
+      const key = `${matched.id}::${fromLocation}`;
+      const availableQty = Number(itemStockByLocation.get(key) ?? 0);
+      const queuedQty = queue
+        .filter((row) => row.itemId === matched.id && row.fromLocation === fromLocation)
+        .reduce((sum, row) => sum + Number(row.quantity ?? 0), 0);
+      const remainingQty = Math.max(0, availableQty - queuedQty);
+      if (remainingQty <= 0) return setFormError(`No available stock left for ${matched.sku} in "${fromLocation}".`);
+      if (qty > remainingQty) return setFormError(`Quantity exceeds available stock. Remaining in "${fromLocation}": ${remainingQty}.`);
+    }
     setQueue((prev) => [
       ...prev,
       {
@@ -297,25 +409,26 @@ export function TransferScanModal({ open, onClose, onReviewDone, inline = false,
                 <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary/60">Source & Destination</h3>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">From Location</label>
-                  <select value={fromLocation} onChange={(e) => setFromLocation(e.target.value)} className="w-full h-8 rounded-lg px-2.5 text-sm bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/20 appearance-none">
-                    <option value="">Select…</option>
-                    {locations.map((loc) => (
-                      <option key={`tsf-${loc}`} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
+                  <RenderSafeSelect
+                    value={fromLocation}
+                    onChange={setFromLocation}
+                    placeholder={selectedScanItem?.id ? "Select source location..." : "Select SKU first..."}
+                    options={(hasLocationStockData ? scanFromLocationOptions : locations.map((loc) => ({ location: loc, available: null }))).map((entry) => ({
+                      value: entry.location,
+                      label: entry.available == null ? entry.location : `${entry.location} - ${entry.available}`,
+                    }))}
+                    inputClassName="h-8 rounded-lg px-2.5 text-sm text-slate-900 bg-white border border-slate-200 focus:ring-2 focus:ring-primary/20"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">To Location</label>
-                  <select value={toLocation} onChange={(e) => setToLocation(e.target.value)} className="w-full h-8 rounded-lg px-2.5 text-sm bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/20 appearance-none">
-                    <option value="">Select…</option>
-                    {locations.map((loc) => (
-                      <option key={`tst-${loc}`} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
+                  <RenderSafeSelect
+                    value={toLocation}
+                    onChange={setToLocation}
+                    placeholder="Select..."
+                    options={locations.map((loc) => ({ value: loc, label: loc }))}
+                    inputClassName="h-8 rounded-lg px-2.5 text-sm text-slate-900 bg-white border border-slate-200 focus:ring-2 focus:ring-primary/20"
+                  />
                 </div>
               </section>
 
@@ -368,7 +481,7 @@ export function TransferScanModal({ open, onClose, onReviewDone, inline = false,
   );
 }
 
-export function TransferManualModal({ open, onClose, onReviewDone, inline = false, compact = false }) {
+export function TransferManualModal({ open, onClose, onReviewDone, inline = false, compact = false, operationType = "transfer" }) {
   const MANUAL_PAGE_SIZE = 22;
   const dense = inline || compact;
   useModalA11y(open && !inline, onClose);
@@ -384,6 +497,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
   const [quantity, setQuantity] = useState("");
   const [unit, setUnit] = useState("");
   const [baseUnit, setBaseUnit] = useState("");
+  const [unitCost, setUnitCost] = useState(0);
   const [transferDate, setTransferDate] = useState("");
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
@@ -412,6 +526,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
       setItemNameLocked(false);
       setBaseUnit("");
       setUnit("");
+      setUnitCost(0);
       return;
     }
     setItemName(matched.name || "");
@@ -419,6 +534,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
     const uom = String(matched.unit_of_measure || "").trim();
     setBaseUnit(uom);
     setUnit(uom);
+    setUnitCost(Number(matched.unit_cost ?? 0));
   };
 
   useEffect(() => {
@@ -429,6 +545,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
     setQuantity("");
     setUnit("");
     setBaseUnit("");
+    setUnitCost(0);
     setTransferDate("");
     setFromLocation("");
     setToLocation("");
@@ -449,7 +566,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
     Promise.all([
       supabase
         .from("inventory_items")
-        .select("id,sku,name,unit_of_measure,current_stock,is_active")
+        .select("id,sku,name,unit_of_measure,unit_cost,current_stock,is_active")
         .order("name", { ascending: true })
         .limit(1000),
       supabase
@@ -480,7 +597,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
         const items = (itemsRes.data ?? [])
           .filter((row) => row?.sku)
           .filter((row) => row.is_active !== false)
-          .filter((row) => availableIds.has(String(row.id)));
+          .filter((row) => availableIds.has(String(row.id)) || Number(row.current_stock ?? 0) > 0);
         setSkuOptions(items);
         return;
       }
@@ -574,22 +691,29 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
   };
 
   const availableSkuOptions = useMemo(() => {
-    if (!fromLocation || !hasLocationStockData) return skuOptions;
+    if (!hasLocationStockData) return skuOptions;
+
+    // Keep SKU visible as long as at least one source location still has
+    // remaining stock after considering queued lines for that same location.
     return skuOptions.filter((item) => {
-      const key = `${item.id}::${fromLocation}`;
-      return Number(itemStockByLocation.get(key) ?? 0) > 0;
+      const locationEntries = [...itemStockByLocation.entries()].filter(([key]) => key.startsWith(`${item.id}::`));
+      for (const [key, stockQty] of locationEntries) {
+        const [, loc] = key.split("::");
+        const queuedQty = queue
+          .filter((row) => row.itemId === item.id && row.fromLocation === loc)
+          .reduce((sum, row) => sum + Number(row.quantity ?? 0), 0);
+        if (Math.max(0, Number(stockQty ?? 0) - queuedQty) > 0) return true;
+      }
+      return false;
     });
-  }, [fromLocation, hasLocationStockData, itemStockByLocation, skuOptions]);
+  }, [fromLocation, hasLocationStockData, itemStockByLocation, queue, skuOptions]);
 
   useEffect(() => {
     if (!skuValue) return;
     const stillAvailable = availableSkuOptions.some((opt) => opt.sku?.toLowerCase() === skuValue.toLowerCase());
     if (!stillAvailable) {
-      setSkuValue("");
-      setItemName("");
-      setItemNameLocked(false);
-      setBaseUnit("");
-      setUnit("");
+      // Keep current value visible to avoid blank-looking select fields while dependent options update.
+      return;
     }
   }, [availableSkuOptions, skuValue]);
 
@@ -667,7 +791,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
       setFormError("Transfer Date is required.");
       return;
     }
-    if (!transferBy.trim()) {
+    if (operationType === "transfer" && !transferBy.trim()) {
       setFormError("Transfer By is required.");
       return;
     }
@@ -675,7 +799,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
       setFormError("Requested By is required.");
       return;
     }
-    if (!referenceNo.trim()) {
+    if (operationType === "transfer" && !referenceNo.trim()) {
       setFormError("Reference No. is required.");
       return;
     }
@@ -709,6 +833,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
           itemName: itemName.trim() || matched.name || sku,
           quantity: qty,
           unit: unitValue,
+          unitCost: Number(matched.unit_cost ?? 0),
           transferDate: transferDate || "",
           fromLocation,
           toLocation,
@@ -725,6 +850,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
     setItemName("");
     setItemNameLocked(false);
     setQuantity("");
+    setUnitCost(0);
     setReferenceNo(generateTransferReference());
   };
 
@@ -749,6 +875,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
   };
 
   const queueTotalQty = queue.reduce((acc, row) => acc + row.quantity, 0);
+  const queueTotalValue = queue.reduce((acc, row) => acc + Number(row.quantity ?? 0) * Number(row.unitCost ?? 0), 0);
   const queuePageCount = Math.max(1, Math.ceil(queue.length / MANUAL_PAGE_SIZE));
   const pagedQueue = useMemo(() => {
     const start = (queuePage - 1) * MANUAL_PAGE_SIZE;
@@ -880,7 +1007,7 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
                 disabled={saving}
                 className="px-10 py-3.5 rounded-full font-bold text-sm bg-gradient-to-r from-primary to-primary-container text-on-primary shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none"
               >
-                {saving ? "Saving..." : "Submit for Approval"}
+                {saving ? "Saving..." : (operationType === "request" ? "Submit Request" : "Submit for Approval")}
               </button>
             </div>
           </div>
@@ -895,39 +1022,66 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
               <div className="mb-1.5 grid grid-cols-1 gap-1 md:grid-cols-4">
                 <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
                   <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">From Location</label>
-                  <select value={fromLocation} onChange={(e) => { setFromLocation(e.target.value); setFormError(""); }} className="h-5 w-full appearance-none rounded-md border-none bg-white px-1.5 text-[10px]">
-                    <option value="">Select location...</option>
-                    {fromLocationOptions.map((entry) => <option key={`mf-${entry.location}`} value={entry.location}>{entry.location}</option>)}
-                  </select>
+                  <RenderSafeSelect
+                    value={fromLocation}
+                    onChange={(next) => {
+                      setFromLocation(next);
+                      setFormError("");
+                    }}
+                    placeholder={skuValue ? "Select source location..." : "Select SKU first..."}
+                    options={fromLocationOptions.map((entry) => ({
+                      value: entry.location,
+                      label: `${entry.location} - ${entry.available}`,
+                    }))}
+                    inputClassName="h-5 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-900"
+                  />
                 </div>
                 <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
                   <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">To Location</label>
-                  <select value={toLocation} onChange={(e) => { setToLocation(e.target.value); setFormError(""); }} className="h-5 w-full appearance-none rounded-md border-none bg-white px-1.5 text-[10px]">
-                    <option value="">Select location...</option>
-                    {locations.map((loc) => <option key={`mt-${loc}`} value={loc}>{loc}</option>)}
-                  </select>
+                  <RenderSafeSelect
+                    value={toLocation}
+                    onChange={(next) => {
+                      setToLocation(next);
+                      setFormError("");
+                    }}
+                    placeholder="Select location..."
+                    options={locations.map((loc) => ({ value: loc, label: loc }))}
+                    inputClassName="h-5 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-900"
+                  />
                 </div>
                 <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
                   <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Transfer Date</label>
                   <input value={transferDate} onChange={(e) => setTransferDate(e.target.value)} type="date" className="h-5 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
                 </div>
                 <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
-                  <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Requested By</label>
-                  <input value={requestedBy} readOnly className="h-5 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
+                  {operationType === "request" ? (
+                    <>
+                      <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Requested By</label>
+                      <input value={requestedBy} readOnly className="h-5 w-full rounded-md border-none bg-slate-100 px-1.5 text-[10px] text-slate-500 cursor-not-allowed" />
+                    </>
+                  ) : (
+                    <>
+                      <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Transfer By</label>
+                      <input value={transferBy} onChange={(e) => setTransferBy(e.target.value)} className="h-5 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
+                    </>
+                  )}
                 </div>
               </div>
               <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-slate-200">
                 <div className="h-full min-h-[260px] overflow-x-auto overflow-y-hidden">
-                  <table className="w-full min-w-[920px] table-fixed text-left text-[10px]">
+                  <table className={`w-full ${operationType === "transfer" ? "min-w-[920px]" : "min-w-[600px]"} table-fixed text-left text-[10px]`}>
                     <thead className="sticky top-0 z-10 bg-slate-100">
                       <tr>
-                        <th className="w-[16%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">SKU-Code</th>
-                        <th className="w-[16%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Item Name</th>
-                        <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">UOM</th>
-                        <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center">Quantity</th>
-                        <th className="w-[16%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Transfer By</th>
-                        <th className="w-[14%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Reference</th>
-                        <th className="w-[8%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center">Action</th>
+                        <th className={`${operationType === "transfer" ? "w-[20%]" : "w-[35%]"} px-2 py-1.5 text-[9px] uppercase text-on-surface-variant`}>SKU-Code</th>
+                        <th className={`${operationType === "transfer" ? "w-[24%]" : "w-[40%]"} px-2 py-1.5 text-[9px] uppercase text-on-surface-variant`}>Item Name</th>
+                        <th className={`${operationType === "transfer" ? "w-[12%]" : "w-[15%]"} px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center`}>Quantity</th>
+                        {operationType === "transfer" ? (
+                          <>
+                            <th className="w-[16%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Unit Cost</th>
+                            <th className="w-[18%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant">Transfer Value</th>
+                          </>
+                        ) : null}
+                        <th className="w-[10%] px-2 py-1.5 text-[9px] uppercase text-on-surface-variant text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200/80 bg-white">
@@ -935,10 +1089,13 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
                         <tr key={row.id}>
                           <td className="truncate px-2 py-1 font-medium">{row.sku}</td>
                           <td className="truncate px-2 py-1">{row.itemName}</td>
-                          <td className="px-2 py-1">{row.unit}</td>
                           <td className="px-2 py-1 text-center font-semibold">{row.quantity}</td>
-                          <td className="truncate px-2 py-1">{row.transferBy}</td>
-                          <td className="truncate px-2 py-1">{row.referenceNo}</td>
+                          {operationType === "transfer" ? (
+                            <>
+                              <td className="px-2 py-1">{formatMoney(row.unitCost)}</td>
+                              <td className="px-2 py-1 font-semibold">{formatMoney(Number(row.quantity ?? 0) * Number(row.unitCost ?? 0))}</td>
+                            </>
+                          ) : null}
                           <td className="px-2 py-1 text-center">
                             <button type="button" onClick={() => removeQueueLine(row.id)} className="rounded-full p-0.5 hover:bg-slate-100" aria-label={`Remove ${row.sku}`}>
                               <span className="material-symbols-outlined text-[14px]">delete</span>
@@ -948,40 +1105,79 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
                       ))}
                       <tr className="bg-slate-50/70">
                         <td className="px-1.5 py-1">
-                          <select value={skuValue} onChange={(e) => applySkuSelection(e.target.value)} onKeyDown={handleManualEntryKeyDown} className="h-6 w-full appearance-none rounded-md border-none bg-white px-1.5 text-[10px]">
-                            <option value="">Select SKU...</option>
-                            {availableSkuOptions.map((item) => <option key={item.id} value={item.sku}>{item.sku}</option>)}
-                          </select>
+                          <RenderSafeSelect
+                            value={skuValue}
+                            onChange={applySkuSelection}
+                            placeholder="Select SKU..."
+                            options={availableSkuOptions.map((item) => ({ value: item.sku, label: item.sku }))}
+                            inputClassName="h-6 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-900"
+                          />
                         </td>
                         <td className="px-1.5 py-1">
                           <input value={itemName} onChange={(e) => setItemName(e.target.value)} onKeyDown={handleManualEntryKeyDown} readOnly={itemNameLocked} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
                         </td>
                         <td className="px-1.5 py-1">
-                          <input value={unit} readOnly onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px] text-slate-800" />
+                          <input
+                            value={quantity}
+                            onChange={(e) => setQuantity(e.target.value)}
+                            onKeyDown={handleManualEntryKeyDown}
+                            type="number"
+                            min="1"
+                            max={remainingQtyForSelected != null ? remainingQtyForSelected : undefined}
+                            className="h-6 w-full rounded-md border-none bg-white px-1.5 text-center text-[10px]"
+                          />
                         </td>
+                        {operationType === "transfer" ? (
+                          <>
+                            <td className="px-1.5 py-1">
+                              <input
+                                value={unitCost > 0 ? formatMoney(unitCost) : ""}
+                                readOnly
+                                onKeyDown={handleManualEntryKeyDown}
+                                className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px] text-slate-800"
+                                placeholder="Auto"
+                              />
+                            </td>
+                            <td className="px-1.5 py-1">
+                              <input
+                                value={formatMoney(Number(quantity || 0) * Number(unitCost || 0))}
+                                readOnly
+                                onKeyDown={handleManualEntryKeyDown}
+                                className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px] text-slate-800"
+                              />
+                            </td>
+                          </>
+                        ) : null}
                         <td className="px-1.5 py-1">
-                          <input value={quantity} onChange={(e) => setQuantity(e.target.value)} onKeyDown={handleManualEntryKeyDown} type="number" min="1" max={remainingQtyForSelected != null ? remainingQtyForSelected : undefined} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-center text-[10px]" />
+                          <span className="text-[9px] font-semibold text-primary/80">Enter</span>
                         </td>
-                        <td className="px-1.5 py-1">
-                          <input value={transferBy} onChange={(e) => setTransferBy(e.target.value)} onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} onKeyDown={handleManualEntryKeyDown} className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]" />
-                        </td>
-                        <td className="px-1.5 py-1 text-center text-[9px] font-semibold text-primary/80">Enter</td>
                       </tr>
                       {Array.from({ length: Math.max(0, MANUAL_PAGE_SIZE - pagedQueue.length - 1) }).map((_, idx) => (
                         <tr key={`transfer-empty-row-${idx}`} className="bg-white">
-                          <td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-center text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1 text-[10px] text-slate-300">—</td><td className="px-2 py-1"></td>
+                          <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                          <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                          <td className="px-2 py-1 text-center text-[10px] text-slate-300">—</td>
+                          {operationType === "transfer" ? (
+                            <>
+                              <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                              <td className="px-2 py-1 text-[10px] text-slate-300">—</td>
+                            </>
+                          ) : null}
+                          <td className="px-2 py-1"></td>
                         </tr>
                       ))}
                     </tbody>
                     {queue.length > 0 ? (
                       <tfoot>
                         <tr className="sticky bottom-0 z-10 bg-slate-700 text-white">
-                          <td className="px-2 py-1.5 text-[10px] font-semibold" colSpan={3}>Totals</td>
+                          <td className="px-2 py-1.5 text-[10px] font-semibold" colSpan={2}>Totals</td>
                           <td className="px-2 py-1.5 text-center font-semibold">{queueTotalQty}</td>
-                          <td className="px-2 py-1.5" colSpan={2}></td>
+                          {operationType === "transfer" ? (
+                            <>
+                              <td className="px-2 py-1.5"></td>
+                              <td className="px-2 py-1.5 font-semibold">{formatMoney(queueTotalValue)}</td>
+                            </>
+                          ) : null}
                           <td className="px-2 py-1.5 text-right">
                             <button type="button" onClick={() => setQueue([])} className="rounded-md bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold text-white hover:bg-white/25">Clear</button>
                           </td>
@@ -994,6 +1190,9 @@ export function TransferManualModal({ open, onClose, onReviewDone, inline = fals
               <div className="mt-1 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-on-surface-variant">Total Quantity: <span className="font-semibold text-on-surface">{queueTotalQty} units</span></span>
+                  {operationType === "transfer" ? (
+                    <span className="text-[10px] text-on-surface-variant">Total Value: <span className="font-semibold text-on-surface">{formatMoney(queueTotalValue)}</span></span>
+                  ) : null}
                   {queue.length > MANUAL_PAGE_SIZE ? (
                     <div className="flex items-center gap-1 text-[9px]">
                       <button type="button" onClick={() => setQueuePage((p) => Math.max(1, p - 1))} disabled={queuePage <= 1} className="h-5 rounded-md bg-slate-100 px-1.5 font-semibold text-slate-700 disabled:opacity-40">Prev</button>
@@ -1223,25 +1422,23 @@ export function TransferBatchModal({ open, onClose, onReviewDone, inline = false
                 <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary/60">Transfer Routing</h3>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-widest text-on-surface-variant">From Location</label>
-                  <select value={fromLocation} onChange={(e) => setFromLocation(e.target.value)} className="w-full h-8 bg-surface-container-highest border-none rounded-lg px-2.5 text-sm appearance-none">
-                    <option value="">Select…</option>
-                    {locations.map((loc) => (
-                      <option key={`tbf-${loc}`} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
+                  <RenderSafeSelect
+                    value={fromLocation}
+                    onChange={setFromLocation}
+                    placeholder="Select..."
+                    options={locations.map((loc) => ({ value: loc, label: loc }))}
+                    inputClassName="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold uppercase tracking-widest text-on-surface-variant">To Location</label>
-                  <select value={toLocation} onChange={(e) => setToLocation(e.target.value)} className="w-full h-8 bg-surface-container-highest border-none rounded-lg px-2.5 text-sm appearance-none">
-                    <option value="">Select…</option>
-                    {locations.map((loc) => (
-                      <option key={`tbt-${loc}`} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
+                  <RenderSafeSelect
+                    value={toLocation}
+                    onChange={setToLocation}
+                    placeholder="Select..."
+                    options={locations.map((loc) => ({ value: loc, label: loc }))}
+                    inputClassName="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900"
+                  />
                 </div>
               </section>
               <section className="rounded-lg border border-outline-variant/20 bg-surface p-2 space-y-1.5">

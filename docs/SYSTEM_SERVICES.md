@@ -10,7 +10,7 @@ This document aligns your template **0.7** with what exists **today** and what i
 | **Application logs** | Not centralized to a third-party service in-repo. |
 | **Admin audit UI** | **Implemented:** `frontend/src/pages/admin/AuditLogs.jsx` at `/audit-logs` (Admin). |
 
-**Database:** Run `backend/supabase/migrations/002_audit_logs_rls.sql` in Supabase so `audit_trigger` stays `SECURITY DEFINER` and only Admins can `SELECT` from `audit_logs`.
+**Database:** Keep `audit_trigger` and access controls configured in your PostgreSQL database so only authorized roles can `SELECT` from `audit_logs`.
 
 ---
 

@@ -1236,7 +1236,8 @@ export function ManualEntryModal({ open, onClose, onReviewDone, inline = false, 
                             ) : null}
                             {selectablePoLines.map((line) => (
                               <option key={line.lineId} value={String(line.lineId)}>
-                                {String(line.sku || "").trim() || String(line.itemName || "").trim() || "No SKU"}
+                                {(String(line.sku || "").trim() || String(line.itemName || "").trim() || "No SKU") +
+                                  ` - ${line.remainingQty}`}
                               </option>
                             ))}
                           </select>

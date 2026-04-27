@@ -12,8 +12,8 @@ This maps your template sections (0.1–0.7) to **where it is satisfied in this 
 | 0.2.4 | Environment variables | **Documented + template** | `frontend/.env.example`; client reads `VITE_*` in `frontend/src/lib/supabase.js`. |
 | 0.3.1 | Version control | **Documented** | `docs/DEVELOPER_SETUP.md` §3 — initialize Git locally, connect remote, follow branch/PR rules. |
 | 0.4.1 | Build / automation | **Applied + CI** | `frontend` scripts `build` / `lint`; `.github/workflows/frontend-ci.yml`. |
-| 0.5.1 | Database setup | **Applied** | `backend/supabase/migrations/001_inventory_setup.sql`, `database-schema.md`. |
-| 0.5.2 | Multi-tenancy | **Applied** | `organizations` + `organization_id` on profiles and tenant tables; RLS + triggers in `backend/supabase/migrations/008_multi_tenancy.sql`. See `SYSTEM_REQUIREMENTS.md` BR-14. |
+| 0.5.1 | Database setup | **Applied** | External PostgreSQL database + `backend/future/node-bff` integration, `database-schema.md`. |
+| 0.5.2 | Multi-tenancy | **Applied** | `organizations` + `organization_id` model documented in `database-schema.md` and `SYSTEM_REQUIREMENTS.md` BR-14. |
 | 0.5.3 | Authentication | **Applied** | Supabase Auth; `frontend/src/contexts/AuthContext.jsx`. |
 | 0.5.4 | Authorization | **Applied** | RLS in migration; UI `frontend/src/lib/roleAccess.js` + `App.jsx`. |
 | 0.5.5 | API base | **Applied** | PostgREST + Edge Functions; see `SYSTEM_ARCHITECTURE.md` §5 and OpenAPI. |

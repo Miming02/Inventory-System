@@ -138,7 +138,7 @@ function CreatePOPageForm({ supplierOptions, inventoryItemOptions, onCreated, cr
       name: selectedItem.name ?? "",
       description: "",
       unit: selectedItem.unit_of_measure ?? "unit",
-      unitPrice: prev.unitPrice || String(selectedItem.unit_cost ?? ""),
+      unitPrice: "",
     }));
   };
 

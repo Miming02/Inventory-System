@@ -87,6 +87,10 @@ function normalizeLocationValue(raw) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function formatMoney(value) {
+  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(Number(value ?? 0));
+}
+
 function isMissingInventoryItemLocationsError(err) {
   const msg = String(err?.message || "").toLowerCase();
   const details = String(err?.details || "").toLowerCase();
@@ -628,9 +632,10 @@ export default function InventoryItems() {
   const loadInventory = useCallback(async () => {
     setLoading(true);
     setLoadError("");
-    const term = sanitizeSearch(debouncedSearch);
-    const from = (page - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
+    try {
+      const term = sanitizeSearch(debouncedSearch);
+      const from = (page - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
 
     let listQuery = supabase
       .from("inventory_items")
@@ -698,6 +703,28 @@ export default function InventoryItems() {
     const itemIds = listRows.map((r) => r.id);
     const breakdown = {};
     if (itemIds.length > 0) {
+      const itemById = new Map(listRows.map((r) => [r.id, r]));
+      const movementCostRes = await supabase
+        .from("stock_movements")
+        .select("item_id,to_location,unit_cost,movement_type,created_at")
+        .in("item_id", itemIds)
+        .eq("movement_type", "in")
+        .not("unit_cost", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(15000);
+      const latestCostByItemLocation = new Map();
+      if (!movementCostRes.error) {
+        for (const move of movementCostRes.data ?? []) {
+          const itemId = move.item_id;
+          const loc = normalizeLocationValue(move.to_location);
+          if (!itemId || !loc) continue;
+          const key = `${itemId}::${loc}`;
+          if (!latestCostByItemLocation.has(key)) {
+            latestCostByItemLocation.set(key, Number(move.unit_cost ?? 0));
+          }
+        }
+      }
+
       const locBalRes = hasInventoryItemLocationsTable
         ? await supabase
             .from("inventory_item_locations")
@@ -708,9 +735,16 @@ export default function InventoryItems() {
         for (const row of locBalRes.data ?? []) {
           const itemId = row.item_id;
           if (!breakdown[itemId]) breakdown[itemId] = [];
+          const normalizedLocation = normalizeLocationValue(row.location) || "—";
+          const item = itemById.get(itemId);
+          const costKey = `${itemId}::${normalizedLocation}`;
+          const unitCost = latestCostByItemLocation.has(costKey)
+            ? Number(latestCostByItemLocation.get(costKey) ?? 0)
+            : Number(item?.unit_cost ?? 0);
           breakdown[itemId].push({
-            location: row.location || "—",
+            location: normalizedLocation,
             qty: Number(row.quantity ?? 0),
+            unitCost,
           });
         }
       } else {
@@ -731,11 +765,14 @@ export default function InventoryItems() {
           for (const row of listRows) {
             const loc = normalizeLocationValue(row.location);
             if (loc) {
-              breakdown[row.id] = [{ location: loc, qty: Number(row.current_stock ?? 0) }];
+              breakdown[row.id] = [{ location: loc, qty: Number(row.current_stock ?? 0), unitCost: Number(row.unit_cost ?? 0) }];
             }
           }
         }
       }
+    }
+    for (const itemId of Object.keys(breakdown)) {
+      breakdown[itemId] = (breakdown[itemId] ?? []).sort((a, b) => b.qty - a.qty || String(a.location).localeCompare(String(b.location)));
     }
     setLocationBreakdownByItem(breakdown);
     const finalRows = mappedRows.map((row) => {
@@ -744,9 +781,13 @@ export default function InventoryItems() {
       const totalFromBreakdown = perLocation.reduce((sum, loc) => sum + Number(loc.qty ?? 0), 0);
       return remapRowQty(row, totalFromBreakdown);
     });
-    setRows(finalRows);
-
-    setLoading(false);
+      setRows(finalRows);
+    } catch (err) {
+      console.error("loadInventory error:", err);
+      setLoadError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
   }, [page, debouncedSearch, hasInventoryItemLocationsTable]);
 
   useEffect(() => {
@@ -803,10 +844,20 @@ export default function InventoryItems() {
 
   const tableRows = rows.map((row) => {
     const qtyNum = Number(row.qty ?? 0);
-    const primaryLocation = (locationBreakdownByItem[row.id] ?? [])[0]?.location || row.location || "—";
+    const breakdown = (locationBreakdownByItem[row.id] ?? [])
+      .map((entry) => ({
+        location: entry.location || "—",
+        qty: Number(entry.qty ?? 0),
+        unitCost: Number(entry.unitCost ?? row.unitCost ?? 0),
+      }))
+      .filter((entry) => Number.isFinite(entry.qty) && entry.qty > 0);
+    const primaryLocation = breakdown[0]?.location || row.location || "—";
     const status = !row.isActive ? "Locked" : qtyNum <= 0 ? "Out of Stock" : "Available";
-    const stockValue = qtyNum * Number(row.unitCost ?? 0);
-    return { ...row, qtyNum, primaryLocation, status, stockValue };
+    const stockValue =
+      breakdown.length > 0
+        ? breakdown.reduce((sum, entry) => sum + entry.qty * Number(entry.unitCost ?? 0), 0)
+        : qtyNum * Number(row.unitCost ?? 0);
+    return { ...row, qtyNum, primaryLocation, status, stockValue, breakdown };
   });
 
   const statusClasses = (status) => {
@@ -905,29 +956,78 @@ export default function InventoryItems() {
                             </td>
                           </tr>
                         ) : (
-                          tableRows.map((row) => (
-                            <tr key={row.id}>
-                              <td className="px-2.5 py-2">
-                                <div className="flex items-center gap-2">
-                                  <ItemThumbOrIcon src={row.image_url} alt={row.name} size="sm" />
-                                  <div className="min-w-0">
-                                    <p className="truncate text-[13px] font-semibold text-on-surface">{row.name}</p>
-                                    <p className="truncate text-[10px] text-on-surface-variant">{row.sku}</p>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-2.5 py-2 text-[13px] font-semibold text-on-surface">
-                                {row.qtyNum} {row.baseUnit}
-                              </td>
-                              <td className="truncate px-2.5 py-2 text-[13px] text-on-surface">{row.primaryLocation}</td>
-                              <td className="px-2.5 py-2">
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusClasses(row.status)}`}>{row.status}</span>
-                              </td>
-                              <td className="px-2.5 py-2 text-[13px] font-semibold text-on-surface">
-                                {new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(row.stockValue)}
-                              </td>
-                            </tr>
-                          ))
+                          tableRows.map((row) => {
+                            const isExpanded = Boolean(expandedRows[row.id]);
+                            const hasBreakdown = row.breakdown.length > 1;
+                            return (
+                              <Fragment key={row.id}>
+                                <tr>
+                                  <td className="px-2.5 py-2">
+                                    <div className="flex items-center gap-2">
+                                      <ItemThumbOrIcon src={row.image_url} alt={row.name} size="sm" />
+                                      <div className="min-w-0">
+                                        <p className="truncate text-[13px] font-semibold text-on-surface">{row.name}</p>
+                                        <p className="truncate text-[10px] text-on-surface-variant">{row.sku}</p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-2.5 py-2 text-[13px] font-semibold text-on-surface">
+                                    <div className="flex items-center gap-1.5">
+                                      <span>{row.qtyNum} {row.baseUnit}</span>
+                                      {hasBreakdown ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleRowExpanded(row.id)}
+                                          className="inline-flex h-5 w-5 items-center justify-center rounded-full text-on-surface-variant hover:bg-slate-100 hover:text-on-surface"
+                                          aria-label={isExpanded ? "Hide quantity breakdown" : "Show quantity breakdown"}
+                                          title={isExpanded ? "Hide breakdown" : "Show breakdown"}
+                                        >
+                                          <span className="material-symbols-outlined text-[15px] leading-none">
+                                            {isExpanded ? "expand_less" : "expand_more"}
+                                          </span>
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </td>
+                                  <td className="truncate px-2.5 py-2 text-[13px] text-on-surface">{row.primaryLocation}</td>
+                                  <td className="px-2.5 py-2">
+                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusClasses(row.status)}`}>{row.status}</span>
+                                  </td>
+                                  <td className="px-2.5 py-2 text-[13px] font-semibold text-on-surface">
+                                    {formatMoney(row.stockValue)}
+                                  </td>
+                                </tr>
+                                {hasBreakdown && isExpanded ? (
+                                  <tr>
+                                    <td colSpan={5} className="px-2.5 pb-2 pt-0">
+                                      <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                                        <table className="w-full table-fixed text-left text-[11px]">
+                                          <thead className="bg-slate-100">
+                                            <tr>
+                                              <th className="w-[36%] px-2 py-1.5 font-semibold uppercase tracking-wide text-on-surface-variant">Location</th>
+                                              <th className="w-[18%] px-2 py-1.5 font-semibold uppercase tracking-wide text-on-surface-variant">Qty</th>
+                                              <th className="w-[20%] px-2 py-1.5 font-semibold uppercase tracking-wide text-on-surface-variant">Unit Cost</th>
+                                              <th className="w-[26%] px-2 py-1.5 font-semibold uppercase tracking-wide text-on-surface-variant">Line Value</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-200 bg-white">
+                                            {row.breakdown.map((entry) => (
+                                              <tr key={`${row.id}:breakdown:${entry.location}:${entry.unitCost}`}>
+                                                <td className="truncate px-2 py-1.5 text-on-surface">{entry.location}</td>
+                                                <td className="px-2 py-1.5 text-on-surface">{entry.qty} {row.baseUnit}</td>
+                                                <td className="px-2 py-1.5 text-on-surface">{formatMoney(entry.unitCost)}</td>
+                                                <td className="px-2 py-1.5 font-semibold text-on-surface">{formatMoney(entry.qty * entry.unitCost)}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>

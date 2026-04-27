@@ -1,0 +1,464 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @db.VarChar(255)
+  slug      String?  @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  profiles Profile[]
+
+  @@map("organizations")
+}
+
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique @db.VarChar(50)
+  description String?
+  permissions Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  profiles Profile[]
+
+  @@map("roles")
+}
+
+model Profile {
+  id             String       @id @db.Uuid
+  email          String?      @unique @db.VarChar(255)
+  firstName      String       @default("") @map("first_name") @db.VarChar(100)
+  lastName       String       @default("") @map("last_name") @db.VarChar(100)
+  avatarUrl      String?      @map("avatar_url")
+  roleId         String?      @map("role_id") @db.Uuid
+  department     String?      @db.VarChar(100)
+  location       String?      @db.VarChar(100)
+  phone          String?      @db.VarChar(20)
+  isActive       Boolean      @default(true) @map("is_active")
+  lastLogin      DateTime?    @map("last_login") @db.Timestamptz(6)
+  organizationId String       @map("organization_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  role         Role?        @relation(fields: [roleId], references: [id])
+
+  @@index([organizationId])
+  @@map("profiles")
+}
+
+model Category {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String   @db.VarChar(100)
+  description    String?
+  parentId       String?  @map("parent_id") @db.Uuid
+  createdBy      String?  @map("created_by") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("categories")
+}
+
+model Supplier {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String   @db.VarChar(255)
+  contactPerson  String?  @map("contact_person") @db.VarChar(100)
+  email          String?  @db.VarChar(255)
+  phone          String?  @db.VarChar(20)
+  address        String?
+  taxId          String?  @map("tax_id") @db.VarChar(50)
+  paymentTerms   String?  @map("payment_terms") @db.VarChar(100)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdBy      String?  @map("created_by") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("suppliers")
+}
+
+model InventoryItem {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sku            String   @db.VarChar(100)
+  name           String   @db.VarChar(255)
+  description    String?
+  categoryId     String?  @map("category_id") @db.Uuid
+  unitOfMeasure  String   @map("unit_of_measure") @db.VarChar(50)
+  unitCost       Decimal? @map("unit_cost") @db.Decimal(10, 2)
+  sellingPrice   Decimal? @map("selling_price") @db.Decimal(10, 2)
+  reorderLevel   Int      @default(0) @map("reorder_level")
+  maxStock       Int?     @map("max_stock")
+  minStock       Int?     @map("min_stock")
+  currentStock   Int      @default(0) @map("current_stock")
+  reservedStock  Int      @default(0) @map("reserved_stock")
+  isActive       Boolean  @default(true) @map("is_active")
+  imageUrl       String?  @map("image_url")
+  barcode        String?  @db.VarChar(100)
+  location       String?  @db.VarChar(100)
+  createdBy      String?  @map("created_by") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, sku], map: "inventory_items_org_sku_unique")
+  @@index([organizationId])
+  @@map("inventory_items")
+}
+
+model PurchaseOrder {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  poNumber            String   @map("po_number") @db.VarChar(50)
+  supplierId          String?  @map("supplier_id") @db.Uuid
+  status              String   @default("draft") @db.VarChar(20)
+  priority            String   @default("medium") @db.VarChar(10)
+  expectedDeliveryDate DateTime? @map("expected_delivery_date") @db.Date
+  actualDeliveryDate  DateTime? @map("actual_delivery_date") @db.Date
+  subtotal            Decimal  @default(0) @db.Decimal(12, 2)
+  taxAmount           Decimal  @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  totalAmount         Decimal  @default(0) @map("total_amount") @db.Decimal(12, 2)
+  notes               String?
+  createdBy           String?  @map("created_by") @db.Uuid
+  approvedBy          String?  @map("approved_by") @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, poNumber], map: "purchase_orders_org_po_number_unique")
+  @@index([organizationId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  poId             String?  @map("po_id") @db.Uuid
+  itemId           String?  @map("item_id") @db.Uuid
+  quantityOrdered  Int      @map("quantity_ordered")
+  quantityReceived Int      @default(0) @map("quantity_received")
+  unitPrice        Decimal  @map("unit_price") @db.Decimal(10, 2)
+  notes            String?
+  organizationId   String   @map("organization_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("purchase_order_items")
+}
+
+model StockMovement {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId        String?  @map("item_id") @db.Uuid
+  movementType  String   @map("movement_type") @db.VarChar(20)
+  referenceType String   @map("reference_type") @db.VarChar(20)
+  referenceId   String?  @map("reference_id") @db.Uuid
+  quantity      Decimal  @db.Decimal(12, 3)
+  unitCost      Decimal? @map("unit_cost") @db.Decimal(12, 2)
+  fromLocation  String?  @map("from_location") @db.VarChar(100)
+  toLocation    String?  @map("to_location") @db.VarChar(100)
+  notes         String?
+  createdBy     String?  @map("created_by") @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("stock_movements")
+}
+
+model StockTransfer {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transferNumber String   @map("transfer_number") @db.VarChar(50)
+  fromLocation   String   @map("from_location") @db.VarChar(100)
+  toLocation     String   @map("to_location") @db.VarChar(100)
+  status         String   @default("pending") @db.VarChar(20)
+  notes          String?
+  createdBy      String?  @map("created_by") @db.Uuid
+  approvedBy     String?  @map("approved_by") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, transferNumber], map: "stock_transfers_org_transfer_number_unique")
+  @@index([organizationId])
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transferId  String?  @map("transfer_id") @db.Uuid
+  itemId      String?  @map("item_id") @db.Uuid
+  quantity    Decimal  @db.Decimal(12, 3)
+  organizationId String @map("organization_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("stock_transfer_items")
+}
+
+model StockCount {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  countNumber String   @map("count_number") @db.VarChar(50)
+  location    String   @db.VarChar(100)
+  status      String   @default("in_progress") @db.VarChar(20)
+  notes       String?
+  createdBy   String?  @map("created_by") @db.Uuid
+  approvedBy  String?  @map("approved_by") @db.Uuid
+  startDate   DateTime? @map("start_date") @db.Timestamptz(6)
+  endDate     DateTime? @map("end_date") @db.Timestamptz(6)
+  organizationId String @map("organization_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, countNumber], map: "stock_counts_org_count_number_unique")
+  @@index([organizationId])
+  @@map("stock_counts")
+}
+
+model StockCountItem {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  countId         String?  @map("count_id") @db.Uuid
+  itemId          String?  @map("item_id") @db.Uuid
+  systemQuantity  Int      @map("system_quantity")
+  countedQuantity Int      @map("counted_quantity")
+  notes           String?
+  organizationId  String   @map("organization_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("stock_count_items")
+}
+
+model StockAdjustment {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adjustmentNumber String  @map("adjustment_number") @db.VarChar(50)
+  itemId           String? @map("item_id") @db.Uuid
+  adjustmentType   String  @map("adjustment_type") @db.VarChar(20)
+  quantity         Decimal @db.Decimal(12, 3)
+  reason           String
+  status           String  @default("pending") @db.VarChar(20)
+  approvedBy       String? @map("approved_by") @db.Uuid
+  createdBy        String? @map("created_by") @db.Uuid
+  organizationId   String  @map("organization_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, adjustmentNumber], map: "stock_adjustments_org_adjustment_number_unique")
+  @@index([organizationId])
+  @@map("stock_adjustments")
+}
+
+model Notification {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  title          String   @db.VarChar(255)
+  message        String
+  type           String   @db.VarChar(50)
+  isRead         Boolean  @default(false) @map("is_read")
+  actionUrl      String?  @map("action_url")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([organizationId])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  action         String   @db.VarChar(100)
+  tableName      String?  @map("table_name") @db.VarChar(100)
+  recordId       String?  @map("record_id") @db.Uuid
+  oldValues      Json?    @map("old_values")
+  newValues      Json?    @map("new_values")
+  ipAddress      String?  @map("ip_address") @db.Inet
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model UnitConversion {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  fromUnit       String   @map("from_unit") @db.VarChar(30)
+  toUnit         String   @map("to_unit") @db.VarChar(30)
+  multiplier     Decimal  @db.Decimal(18, 8)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("unit_conversions")
+}
+
+model ItemUnitConversion {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  itemId         String   @map("item_id") @db.Uuid
+  fromUnit       String   @map("from_unit") @db.VarChar(30)
+  toUnit         String   @map("to_unit") @db.VarChar(30)
+  multiplier     Decimal  @db.Decimal(18, 8)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("item_unit_conversions")
+}
+
+model Bom {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(200)
+  type           String   @db.VarChar(20)
+  description    String?
+  isActive       Boolean  @default(true) @map("is_active")
+  createdBy      String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("boms")
+}
+
+model BomItem {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  bomId          String   @map("bom_id") @db.Uuid
+  itemId         String   @map("item_id") @db.Uuid
+  quantity       Decimal  @db.Decimal(14, 4)
+  unit           String?  @db.VarChar(30)
+  requiredBaseQty Decimal @map("required_base_qty") @db.Decimal(14, 4)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("bom_items")
+}
+
+model InventoryItemLocation {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId    String   @map("item_id") @db.Uuid
+  location  String   @db.VarChar(100)
+  quantity  Int      @default(0)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([itemId, location])
+  @@map("inventory_item_locations")
+}
+
+model ReceiveTransaction {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionNumber String  @map("transaction_number")
+  sourceType        String  @map("source_type")
+  supplierName      String? @map("supplier_name")
+  receivedByText    String? @map("received_by_text")
+  receivedDate      DateTime? @map("received_date") @db.Date
+  location          String?
+  attachmentPath    String? @map("attachment_path")
+  remarks           String?
+  status            String  @default("draft")
+  submittedBy       String? @map("submitted_by") @db.Uuid
+  reviewedBy        String? @map("reviewed_by") @db.Uuid
+  reviewedAt        DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewNotes       String? @map("review_notes")
+  createdBy         String? @map("created_by") @db.Uuid
+  organizationId    String  @map("organization_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, transactionNumber])
+  @@map("receive_transactions")
+}
+
+model ReceiveTransactionItem {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  receiveTransactionId String  @map("receive_transaction_id") @db.Uuid
+  itemId             String   @map("item_id") @db.Uuid
+  poId               String?  @map("po_id") @db.Uuid
+  poLineId           String?  @map("po_line_id") @db.Uuid
+  sku                String
+  itemName           String   @map("item_name")
+  description        String?
+  unitOfMeasure      String   @map("unit_of_measure")
+  quantity           Decimal  @db.Decimal(12, 3)
+  unitCost           Decimal  @map("unit_cost") @db.Decimal(12, 2)
+  lineCost           Decimal  @map("line_cost") @db.Decimal(12, 2)
+  conditionTag       String   @map("condition_tag")
+  issueQuantity      Decimal  @map("issue_quantity") @db.Decimal(12, 3)
+  issueReason        String?  @map("issue_reason")
+  issueNotes         String?  @map("issue_notes")
+  location           String?
+  organizationId     String   @map("organization_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("receive_transaction_items")
+}
+
+model DeliveryRequest {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  referenceNo           String   @map("reference_no")
+  customerName          String   @map("customer_name")
+  deliveryDate          DateTime @map("delivery_date") @db.Date
+  trackingNumber        String?  @map("tracking_number")
+  deliveryConfirmation  String?  @map("delivery_confirmation")
+  attachmentPath        String?  @map("attachment_path")
+  status                String   @default("draft")
+  submittedBy           String?  @map("submitted_by") @db.Uuid
+  reviewedBy            String?  @map("reviewed_by") @db.Uuid
+  reviewedAt            DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewNotes           String?  @map("review_notes")
+  createdBy             String?  @map("created_by") @db.Uuid
+  organizationId        String   @map("organization_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, referenceNo])
+  @@map("delivery_requests")
+}
+
+model DeliveryRequestItem {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deliveryRequestId String  @map("delivery_request_id") @db.Uuid
+  itemId           String   @map("item_id") @db.Uuid
+  sku              String
+  itemName         String   @map("item_name")
+  quantity         Decimal  @db.Decimal(12, 3)
+  unitOfMeasure    String   @map("unit_of_measure")
+  fromLocation     String?  @map("from_location")
+  toLocation       String?  @map("to_location")
+  organizationId   String   @map("organization_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("delivery_request_items")
+}
+
+model ProductionRun {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  productionNumber   String   @map("production_number")
+  bomId              String   @map("bom_id") @db.Uuid
+  finishedGoodItemId String   @map("finished_good_item_id") @db.Uuid
+  location           String   @db.VarChar(100)
+  targetQuantity     Decimal  @map("target_quantity") @db.Decimal(14, 4)
+  outputUnit         String?  @map("output_unit") @db.VarChar(30)
+  finishedGoodBaseQty Decimal @map("finished_good_base_qty") @db.Decimal(14, 4)
+  addFinishedGoods   Boolean  @default(true) @map("add_finished_goods")
+  requiredComponents Json     @default("[]") @map("required_components")
+  status             String   @default("in_progress")
+  startedAt          DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt        DateTime? @map("completed_at") @db.Timestamptz(6)
+  failedAt           DateTime? @map("failed_at") @db.Timestamptz(6)
+  failureReason      String?  @map("failure_reason")
+  createdBy          String?  @map("created_by") @db.Uuid
+  completedBy        String?  @map("completed_by") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, productionNumber], map: "production_runs_org_number_unique")
+  @@map("production_runs")
+}
+
