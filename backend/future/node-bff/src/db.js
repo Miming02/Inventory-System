@@ -38,16 +38,40 @@ export async function ensureCoreTables() {
     ADD COLUMN IF NOT EXISTS item_type TEXT NOT NULL DEFAULT 'ingredient'
   `);
 
+  await pool.query(`
+    ALTER TABLE public.inventory_items
+    ALTER COLUMN current_stock TYPE DECIMAL(14,4) USING current_stock::DECIMAL(14,4),
+    ALTER COLUMN current_stock SET DEFAULT 0
+  `);
+
+  // Per-location balances table used by Manage Locations page.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.locations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      organization_id UUID,
+      name VARCHAR(100) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (organization_id, name)
+    )
+  `);
+
   // Per-location balances table used by Manage Locations page.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.inventory_item_locations (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       item_id UUID NOT NULL REFERENCES public.inventory_items(id) ON DELETE CASCADE,
       location VARCHAR(100) NOT NULL,
-      quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+      quantity DECIMAL(14,4) NOT NULL DEFAULT 0 CHECK (quantity >= 0),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE (item_id, location)
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.inventory_item_locations
+    ALTER COLUMN quantity TYPE DECIMAL(14,4) USING quantity::DECIMAL(14,4),
+    ALTER COLUMN quantity SET DEFAULT 0
   `);
 
   // Backfill per-location rows from legacy inventory_items.location.
@@ -60,6 +84,30 @@ export async function ensureCoreTables() {
     ON CONFLICT (item_id, location)
     DO UPDATE SET
       quantity = EXCLUDED.quantity,
+      updated_at = NOW()
+  `);
+
+  // Backfill standalone locations from both modern and legacy sources.
+  await pool.query(`
+    INSERT INTO public.locations (organization_id, name, updated_at)
+    SELECT DISTINCT i.organization_id, l.location, NOW()
+    FROM public.inventory_item_locations l
+    JOIN public.inventory_items i ON i.id = l.item_id
+    WHERE l.location IS NOT NULL
+      AND TRIM(l.location) <> ''
+    ON CONFLICT (organization_id, name)
+    DO UPDATE SET
+      updated_at = NOW()
+  `);
+
+  await pool.query(`
+    INSERT INTO public.locations (organization_id, name, updated_at)
+    SELECT DISTINCT i.organization_id, TRIM(i.location), NOW()
+    FROM public.inventory_items i
+    WHERE i.location IS NOT NULL
+      AND TRIM(i.location) <> ''
+    ON CONFLICT (organization_id, name)
+    DO UPDATE SET
       updated_at = NOW()
   `);
 }

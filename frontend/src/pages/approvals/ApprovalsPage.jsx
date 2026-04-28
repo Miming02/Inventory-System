@@ -585,10 +585,14 @@ export default function ApprovalsPage() {
           const isReject = action === "reject";
           const note = String(reviewNotes || "").trim();
           if (isReject && !note) throw new Error("Reason is required.");
+          const fallbackNote =
+            action === "approve"
+              ? `Approved from approvals page by ${profile?.id || "system"}`
+              : note;
           const { error: rpcErr } = await supabase.rpc("process_stock_count_review", {
             p_count_id: row.id,
             p_action: action,
-            p_review_notes: note || null,
+            p_review_notes: fallbackNote || "No review notes",
           });
           if (rpcErr) throw rpcErr;
         } else {

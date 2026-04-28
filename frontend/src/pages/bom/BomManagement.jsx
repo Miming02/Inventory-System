@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { getErrorMessage } from "../../lib/errors";
 import { useAuth } from "../../contexts/AuthContext";
+import { useDistinctLocations } from "../../lib/useDistinctLocations";
 
 function normText(v) {
   return String(v || "").trim();
@@ -11,6 +12,13 @@ function normText(v) {
 function toNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function formatQuantity(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value ?? "—";
+  if (Number.isInteger(n)) return String(n);
+  return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
 }
 
 function itemLabel(it) {
@@ -25,6 +33,23 @@ const BOM_TABLE_ROWS = 18;
 const STATUS_OPTIONS = ["draft", "active", "inactive", "obsolete"];
 const ITEM_TYPE_OPTIONS = ["ingredient", "sub_material", "finished_good"];
 
+function createInitialBomForm() {
+  return {
+    sku: "",
+    name: "",
+    code: "",
+    finished_good_item_id: "",
+    output_quantity: "1",
+    output_unit: "",
+    item_type: "",
+    status: "draft",
+    category_id: "",
+    location: "",
+    description: "",
+    attachment_path: "",
+  };
+}
+
 function mapUiStatusToDb(status) {
   if (status === "active") return "active";
   if (status === "inactive" || status === "obsolete") return "archived";
@@ -38,6 +63,9 @@ function mapDbStatusToUi(status) {
 }
 
 function getFinishedGoodId(bom) {
+  const description = String(bom?.description || "");
+  const markerMatch = description.match(/\[FG_ID:([0-9a-fA-F-]{36})\]/);
+  if (markerMatch?.[1]) return markerMatch[1];
   return (
     bom?.finished_good_item_id ??
     bom?.finished_item_id ??
@@ -52,8 +80,19 @@ function isMissingColumnError(err, columnName) {
   return msg.includes(`column "${String(columnName || "").toLowerCase()}"`) && msg.includes("does not exist");
 }
 
+function getMissingColumnName(err) {
+  const msg = String(getErrorMessage(err) || "");
+  const quoted = msg.match(/column "([^"]+)"/i);
+  if (quoted?.[1]) return String(quoted[1]).trim();
+  const singleQuoted = msg.match(/column '([^']+)'/i);
+  if (singleQuoted?.[1]) return String(singleQuoted[1]).trim();
+  const bare = msg.match(/column\s+([a-zA-Z0-9_]+)\s+/i);
+  return bare?.[1] ? String(bare[1]).trim() : "";
+}
+
 export default function BomManagement() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const distinctLocations = useDistinctLocations(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -67,21 +106,10 @@ export default function BomManagement() {
   const [selectedBomItems, setSelectedBomItems] = useState([]);
   const [attachmentName, setAttachmentName] = useState("");
   const [bomFinishedGoodColumn, setBomFinishedGoodColumn] = useState("finished_good_item_id");
+  const [isLegacyBomSchema, setIsLegacyBomSchema] = useState(false);
+  const [isLegacyBomItemsSchema, setIsLegacyBomItemsSchema] = useState(false);
 
-  const [bomForm, setBomForm] = useState({
-    sku: "",
-    name: "",
-    code: "",
-    finished_good_item_id: "",
-    output_quantity: "1",
-    output_unit: "unit",
-    item_type: "finished_good",
-    status: "draft",
-    category_id: "",
-    location: "",
-    description: "",
-    attachment_path: "",
-  });
+  const [bomForm, setBomForm] = useState(() => createInitialBomForm());
 
   const [bomItemForm, setBomItemForm] = useState({
     component_item_id: "",
@@ -89,17 +117,26 @@ export default function BomManagement() {
     unit: "",
   });
 
+  const resetCreateItemForm = useCallback(() => {
+    setBomForm(createInitialBomForm());
+    setBomItemForm({ component_item_id: "", quantity: "", unit: "" });
+    setAttachmentName("");
+    setSelectedBomId("");
+    setSelectedBomItems([]);
+  }, []);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
-    const [itemRes, bomRes, categoryRes, locationsRes] = await Promise.all([
+    const [itemRes, bomRes, categoryRes, locationsRes, savedLocationsRes] = await Promise.all([
       supabase
         .from("inventory_items")
-        .select("id,name,sku,item_type,unit_of_measure,is_active,category_id,location,description")
+        .select("id,name,sku,item_type,unit_of_measure,is_active,category_id,location,description,organization_id")
         .order("name"),
       supabase.from("boms").select("*").order("created_at", { ascending: false }).limit(300),
       supabase.from("categories").select("id,name").order("name", { ascending: true }),
       supabase.from("inventory_items").select("location").not("location", "is", null).limit(2000),
+      supabase.from("locations").select("name").limit(2000),
     ]);
 
     if (itemRes.error || bomRes.error || categoryRes.error || locationsRes.error) {
@@ -113,6 +150,8 @@ export default function BomManagement() {
       ...row,
       _finishedGoodItemId: getFinishedGoodId(row),
     }));
+    const hasLegacyTypeColumn = (bomRes.data ?? []).some((row) => Object.prototype.hasOwnProperty.call(row, "type"));
+    setIsLegacyBomSchema(hasLegacyTypeColumn);
     const detectedColumn = (bomRes.data ?? []).some((row) => Object.prototype.hasOwnProperty.call(row, "finished_good_item_id"))
       ? "finished_good_item_id"
       : (bomRes.data ?? []).some((row) => Object.prototype.hasOwnProperty.call(row, "finished_item_id"))
@@ -121,9 +160,14 @@ export default function BomManagement() {
     setBomFinishedGoodColumn(detectedColumn);
     setBoms(bomRows);
     setCategories(categoryRes.data ?? []);
-    const uniqueLocations = [...new Set((locationsRes.data ?? []).map((row) => normText(row.location)).filter(Boolean))].sort((a, b) =>
-      a.localeCompare(b)
-    );
+    const uniqueLocations = [
+      ...new Set(
+        [
+          ...(locationsRes.data ?? []).map((row) => normText(row.location)),
+          ...((savedLocationsRes.error ? [] : savedLocationsRes.data) ?? []).map((row) => normText(row.name)),
+        ].filter(Boolean)
+      ),
+    ].sort((a, b) => a.localeCompare(b));
     setLocationOptions(uniqueLocations);
     setLoading(false);
   }, []);
@@ -132,6 +176,20 @@ export default function BomManagement() {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!Array.isArray(distinctLocations) || distinctLocations.length === 0) return;
+    setLocationOptions((prev) => {
+      const byKey = new Map();
+      for (const loc of [...(prev ?? []), ...distinctLocations]) {
+        const value = normText(loc);
+        if (!value) continue;
+        const key = value.toLowerCase();
+        if (!byKey.has(key)) byKey.set(key, value);
+      }
+      return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+    });
+  }, [distinctLocations]);
+
   const loadBomItems = useCallback(async (bomId) => {
     if (!bomId) {
       setSelectedBomItems([]);
@@ -139,22 +197,64 @@ export default function BomManagement() {
     }
     setBomItemsLoading(true);
     setError("");
-    const { data, error: e } = await supabase
-      .from("bom_items")
-      .select("id,bom_id,component_item_id,quantity,unit,waste_percent,sort_order,notes,inventory_items(name,sku,unit_of_measure,item_type)")
-      .eq("bom_id", bomId)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: true })
-      .limit(2000);
-    if (e) {
-      setError(getErrorMessage(e));
-      setSelectedBomItems([]);
-      setBomItemsLoading(false);
-      return;
+    const loadModernShape = async () =>
+      await supabase
+        .from("bom_items")
+        .select("id,bom_id,component_item_id,quantity,unit,waste_percent,sort_order,notes,created_at")
+        .eq("bom_id", bomId)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(2000);
+
+    const loadLegacyShape = async () =>
+      await supabase
+        .from("bom_items")
+        .select("id,bom_id,item_id,quantity,unit,required_base_qty,created_at")
+        .eq("bom_id", bomId)
+        .order("created_at", { ascending: true })
+        .limit(2000);
+
+    let data = null;
+    if (isLegacyBomItemsSchema) {
+      const legacyRes = await loadLegacyShape();
+      if (!legacyRes.error) {
+        data = (legacyRes.data ?? []).map((row) => ({
+          ...row,
+          component_item_id: row.item_id,
+        }));
+      } else {
+        const modernRes = await loadModernShape();
+        if (modernRes.error) {
+          setError(getErrorMessage(modernRes.error));
+          setSelectedBomItems([]);
+          setBomItemsLoading(false);
+          return;
+        }
+        setIsLegacyBomItemsSchema(false);
+        data = modernRes.data ?? [];
+      }
+    } else {
+      const modernRes = await loadModernShape();
+      if (!modernRes.error) {
+        data = modernRes.data ?? [];
+      } else {
+        const legacyRes = await loadLegacyShape();
+        if (legacyRes.error) {
+          setError(getErrorMessage(legacyRes.error));
+          setSelectedBomItems([]);
+          setBomItemsLoading(false);
+          return;
+        }
+        setIsLegacyBomItemsSchema(true);
+        data = (legacyRes.data ?? []).map((row) => ({
+          ...row,
+          component_item_id: row.item_id,
+        }));
+      }
     }
     setSelectedBomItems(data ?? []);
     setBomItemsLoading(false);
-  }, []);
+  }, [isLegacyBomItemsSchema]);
 
   useEffect(() => {
     void loadBomItems(selectedBomId);
@@ -175,11 +275,25 @@ export default function BomManagement() {
     [items, selectedBom?._finishedGoodItemId]
   );
   const findExistingBomForFinishedGood = useCallback(
-    (finishedGoodId) =>
-      (boms ?? [])
-        .filter((b) => b._finishedGoodItemId === finishedGoodId)
-        .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0] || null,
-    [boms]
+    (finishedGoodId) => {
+      const fg = items.find((it) => it.id === finishedGoodId) || null;
+      const fgSku = normText(fg?.sku).toLowerCase();
+      const fgName = normText(fg?.name).toLowerCase();
+      return (
+        (boms ?? [])
+          .filter((b) => {
+            if (b._finishedGoodItemId === finishedGoodId) return true;
+            if (!isLegacyBomSchema) return false;
+            const bomName = normText(b?.name).toLowerCase();
+            const bomDescription = normText(b?.description).toLowerCase();
+            if (fgName && (bomName === fgName || bomName === `${fgName} bom`)) return true;
+            if (fgSku && (bomName.includes(fgSku) || bomDescription.includes(fgSku))) return true;
+            return false;
+          })
+          .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0] || null
+      );
+    },
+    [boms, isLegacyBomSchema, items]
   );
 
   const onFinishedGoodChange = useCallback(
@@ -243,11 +357,20 @@ export default function BomManagement() {
       return false;
     }
 
-    const payload = {
+    const freeDescription = normText(bomForm.description);
+    const linkedDescription = `[FG_ID:${fgId}]${freeDescription ? ` ${freeDescription}` : ""}`;
+    const basePayload = {
       name: normText(bomForm.name),
       output_quantity: toNumber(bomForm.output_quantity, 1),
       output_unit: normText(bomForm.output_unit) || "unit",
       status: mapUiStatusToDb(normText(bomForm.status).toLowerCase()),
+      type: "formula",
+      description: linkedDescription,
+      is_active: normText(bomForm.status).toLowerCase() !== "inactive" && normText(bomForm.status).toLowerCase() !== "obsolete",
+      organization_id:
+        fg?.organization_id ||
+        profile?.organization_id ||
+        null,
       notes: [
         normText(bomForm.code) ? `Code: ${normText(bomForm.code)}` : "",
         normText(bomForm.description) ? `Description: ${normText(bomForm.description)}` : "",
@@ -257,22 +380,54 @@ export default function BomManagement() {
         .filter(Boolean)
         .join(" • ") || null,
     };
-    const payloadWithDetectedColumn = {
+    if (!basePayload.organization_id) {
+      setError("Missing organization context. Please re-login and try again.");
+      return false;
+    }
+    const withFinishedGoodColumn = (payload, finishedColumn) => ({
       ...payload,
-      [bomFinishedGoodColumn]: fgId,
+      [finishedColumn]: fgId,
+    });
+    const executeWithMissingColumnFallback = async (executor, initialPayload) => {
+      let payload = { ...initialPayload };
+      const removedColumns = new Set();
+      for (let i = 0; i < 12; i += 1) {
+        const res = await executor(payload);
+        if (!res?.error) return res;
+        const missingColumn = getMissingColumnName(res.error);
+        if (!missingColumn || !Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
+          return res;
+        }
+        if (removedColumns.has(missingColumn)) {
+          return res;
+        }
+        removedColumns.add(missingColumn);
+        const { [missingColumn]: _removed, ...nextPayload } = payload;
+        payload = nextPayload;
+      }
+      return await executor(payload);
     };
 
     const existing = findExistingBomForFinishedGood(fgId);
     if (existing?.id) {
       let updateErr = null;
-      let updateAttempt = await supabase.from("boms").update(payloadWithDetectedColumn).eq("id", existing.id);
+      let updateAttempt = await executeWithMissingColumnFallback(
+        (payload) => supabase.from("boms").update(payload).eq("id", existing.id),
+        withFinishedGoodColumn(basePayload, bomFinishedGoodColumn)
+      );
       updateErr = updateAttempt.error;
       if (updateErr && bomFinishedGoodColumn !== "finished_item_id" && isMissingColumnError(updateErr, "finished_good_item_id")) {
-        updateAttempt = await supabase.from("boms").update({ ...payload, finished_item_id: fgId }).eq("id", existing.id);
+        updateAttempt = await executeWithMissingColumnFallback(
+          (payload) => supabase.from("boms").update(payload).eq("id", existing.id),
+          withFinishedGoodColumn(basePayload, "finished_item_id")
+        );
         updateErr = updateAttempt.error;
         if (!updateErr) setBomFinishedGoodColumn("finished_item_id");
       } else if (updateErr && bomFinishedGoodColumn !== "finished_good_item_id" && isMissingColumnError(updateErr, "finished_item_id")) {
-        updateAttempt = await supabase.from("boms").update({ ...payload, finished_good_item_id: fgId }).eq("id", existing.id);
+        updateAttempt = await executeWithMissingColumnFallback(
+          (payload) => supabase.from("boms").update(payload).eq("id", existing.id),
+          withFinishedGoodColumn(basePayload, "finished_good_item_id")
+        );
         updateErr = updateAttempt.error;
         if (!updateErr) setBomFinishedGoodColumn("finished_good_item_id");
       }
@@ -286,12 +441,25 @@ export default function BomManagement() {
       return true;
     }
 
-    let createRes = await supabase.from("boms").insert(payloadWithDetectedColumn).select("id").single();
+    const createBasePayload = {
+      ...basePayload,
+      ...(isLegacyBomSchema ? {} : { created_by: user?.id ?? null }),
+    };
+    let createRes = await executeWithMissingColumnFallback(
+      (payload) => supabase.from("boms").insert(payload).select("id").single(),
+      withFinishedGoodColumn(createBasePayload, bomFinishedGoodColumn)
+    );
     if (createRes.error && bomFinishedGoodColumn !== "finished_item_id" && isMissingColumnError(createRes.error, "finished_good_item_id")) {
-      createRes = await supabase.from("boms").insert({ ...payload, finished_item_id: fgId }).select("id").single();
+      createRes = await executeWithMissingColumnFallback(
+        (payload) => supabase.from("boms").insert(payload).select("id").single(),
+        withFinishedGoodColumn(createBasePayload, "finished_item_id")
+      );
       if (!createRes.error) setBomFinishedGoodColumn("finished_item_id");
     } else if (createRes.error && bomFinishedGoodColumn !== "finished_good_item_id" && isMissingColumnError(createRes.error, "finished_item_id")) {
-      createRes = await supabase.from("boms").insert({ ...payload, finished_good_item_id: fgId }).select("id").single();
+      createRes = await executeWithMissingColumnFallback(
+        (payload) => supabase.from("boms").insert(payload).select("id").single(),
+        withFinishedGoodColumn(createBasePayload, "finished_good_item_id")
+      );
       if (!createRes.error) setBomFinishedGoodColumn("finished_good_item_id");
     }
     const createdBom = createRes.data;
@@ -335,6 +503,10 @@ export default function BomManagement() {
     }
     if (!location) {
       setError("Default Location is required.");
+      return null;
+    }
+    if (!normText(bomForm.item_type)) {
+      setError("Item Type is required.");
       return null;
     }
 
@@ -436,13 +608,40 @@ export default function BomManagement() {
     const payload = {
       bom_id: selectedBomId,
       component_item_id: componentId,
+      item_id: componentId,
       quantity: qty,
       unit,
+      required_base_qty: qty,
+      organization_id: profile?.organization_id || comp?.organization_id || null,
       waste_percent: 0,
       notes: null,
       sort_order: 0,
     };
-    const { error: e1 } = await supabase.from("bom_items").insert(payload);
+    if (!payload.organization_id) {
+      setError("Missing organization context. Please re-login and try again.");
+      return;
+    }
+    const insertWithMissingColumnFallback = async (initialPayload) => {
+      let nextPayload = { ...initialPayload };
+      const removedColumns = new Set();
+      for (let i = 0; i < 12; i += 1) {
+        const res = await supabase.from("bom_items").insert(nextPayload);
+        if (!res.error) return res;
+        const missingColumn = getMissingColumnName(res.error);
+        if (!missingColumn || !Object.prototype.hasOwnProperty.call(nextPayload, missingColumn)) {
+          return res;
+        }
+        if (removedColumns.has(missingColumn)) {
+          return res;
+        }
+        removedColumns.add(missingColumn);
+        const { [missingColumn]: _removed, ...trimmed } = nextPayload;
+        nextPayload = trimmed;
+      }
+      return await supabase.from("bom_items").insert(nextPayload);
+    };
+
+    const { error: e1 } = await insertWithMissingColumnFallback(payload);
     if (e1) {
       setError(getErrorMessage(e1));
       return;
@@ -461,12 +660,6 @@ export default function BomManagement() {
       return;
     }
     await loadBomItems(selectedBomId);
-  };
-
-  const handleBomItemKeyDown = (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    void createBomItem();
   };
 
   const handleSelectFinishedGood = async (itemId) => {
@@ -502,7 +695,7 @@ export default function BomManagement() {
           </div>
         </div>
       </header>
-
+    
       <main className="mx-auto w-full max-w-[1500px] px-2 pb-4 pt-[4.2rem] sm:px-3 lg:px-4">
         <section className="py-1">
           <div className="relative mx-auto w-full overflow-hidden rounded-[1.4rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
@@ -567,7 +760,7 @@ export default function BomManagement() {
                   <input value={bomForm.output_unit} onChange={(e) => setBomForm((p) => ({ ...p, output_unit: e.target.value }))} className="h-8 w-full rounded-md border-none bg-white px-2 text-xs leading-5 text-slate-900" placeholder="pcs, kg, l..." />
                 </div>
               </div>
-              <div className="mb-1 grid grid-cols-1 gap-1 md:grid-cols-4">
+              <div className="mb-1 grid grid-cols-1 gap-1 md:grid-cols-3">
                 <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
                   <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Item Type</label>
                   <select
@@ -575,6 +768,7 @@ export default function BomManagement() {
                     onChange={(e) => setBomForm((p) => ({ ...p, item_type: e.target.value }))}
                     className="h-8 w-full appearance-none rounded-md border-none bg-white px-2 text-xs leading-5 text-slate-900"
                   >
+                    <option value="">Select item type...</option>
                     {ITEM_TYPE_OPTIONS.map((type) => (
                       <option key={type} value={type}>
                         {type}
@@ -589,16 +783,6 @@ export default function BomManagement() {
                     {locationOptions.map((loc) => (
                       <option key={loc} value={loc}>
                         {loc}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
-                  <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">Status</label>
-                  <select value={bomForm.status} onChange={(e) => setBomForm((p) => ({ ...p, status: e.target.value }))} className="h-8 w-full appearance-none rounded-md border-none bg-white px-2 text-xs leading-5 text-slate-900 capitalize">
-                    {STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
                       </option>
                     ))}
                   </select>
@@ -624,7 +808,18 @@ export default function BomManagement() {
               </div>
 
               <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-slate-200">
-                <div className="h-full min-h-[420px] overflow-x-auto overflow-y-auto pt-1 pb-8">
+                <div
+                  className="h-full min-h-[420px] overflow-x-auto overflow-y-auto pt-1 pb-8"
+                  onKeyDownCapture={(event) => {
+                    if (event.key !== "Enter") return;
+                    const target = event.target;
+                    if (!(target instanceof HTMLElement)) return;
+                    if (!target.closest("[data-bom-component-row='true']")) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void createBomItem();
+                  }}
+                >
                   <table className="w-full min-w-[760px] md:min-w-[980px] table-fixed text-left text-[10px]">
                     <thead className="sticky top-0 z-10 bg-slate-100">
                       <tr>
@@ -646,14 +841,14 @@ export default function BomManagement() {
                         </tr>
                       ) : null}
                       {selectedBomItems.slice(0, BOM_TABLE_ROWS).map((ln) => {
-                        const inv = ln.inventory_items;
-                        const comp = Array.isArray(inv) ? inv[0] : inv;
+                        const compId = ln.component_item_id || ln.item_id || "";
+                        const comp = items.find((it) => it.id === compId) || null;
                         return (
                           <tr key={ln.id}>
                             <td className="truncate px-2 py-1 font-medium">{selectedFinishedGood?.sku || "—"}</td>
                             <td className="truncate px-2 py-1">{normText(comp?.sku) || "—"}</td>
                             <td className="truncate px-2 py-1">{normText(comp?.name) || "—"}</td>
-                            <td className="px-2 py-1 text-center font-semibold">{ln.quantity}</td>
+                            <td className="px-2 py-1 text-center font-semibold">{formatQuantity(ln.quantity)}</td>
                             <td className="px-2 py-1">{ln.unit}</td>
                             <td className="px-2 py-1 text-center font-semibold">1</td>
                             <td className="px-2 py-1 text-center">
@@ -665,7 +860,7 @@ export default function BomManagement() {
                         );
                       })}
 
-                      <tr className="bg-slate-50/70 [&>td]:align-middle">
+                      <tr className="bg-slate-50/70 [&>td]:align-middle" data-bom-component-row="true">
                         <td className="px-1.5 py-2 text-[10px] text-slate-600">{selectedFinishedGood?.sku || "—"}</td>
                         <td className="px-1.5 py-2">
                           <select
@@ -676,7 +871,6 @@ export default function BomManagement() {
                               const baseUom = normText(comp?.unit_of_measure) || "";
                               setBomItemForm((p) => ({ ...p, component_item_id: nextId, unit: normText(p.unit) ? p.unit : baseUom }));
                             }}
-                            onKeyDown={handleBomItemKeyDown}
                             className={`h-9 w-full appearance-none rounded-md border px-2 text-[10px] ${
                               selectedBomId
                                 ? "border-slate-200 bg-white text-slate-900"
@@ -700,13 +894,13 @@ export default function BomManagement() {
                           />
                         </td>
                         <td className="px-1.5 py-2">
-                          <input value={bomItemForm.quantity} onChange={(e) => setBomItemForm((p) => ({ ...p, quantity: e.target.value }))} onKeyDown={handleBomItemKeyDown} type="number" min="0.000001" step="0.000001" className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-center text-[10px]" disabled={!selectedBomId} />
+                          <input value={bomItemForm.quantity} onChange={(e) => setBomItemForm((p) => ({ ...p, quantity: e.target.value }))} type="number" min="0.000001" step="0.000001" className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-center text-[10px]" disabled={!selectedBomId} />
                         </td>
                         <td className="px-1.5 py-2">
-                          <input value={bomItemForm.unit} onChange={(e) => setBomItemForm((p) => ({ ...p, unit: e.target.value }))} onKeyDown={handleBomItemKeyDown} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-[10px]" disabled={!selectedBomId} />
+                          <input value={bomItemForm.unit} onChange={(e) => setBomItemForm((p) => ({ ...p, unit: e.target.value }))} className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-[10px]" disabled={!selectedBomId} />
                         </td>
                         <td className="px-1.5 py-2 text-center text-[9px] font-semibold text-primary/80">Auto</td>
-                        <td className="px-1.5 py-2 text-center text-[9px] font-semibold text-primary/80">Enter</td>
+                        <td className="px-1.5 py-2"></td>
                       </tr>
 
                       {Array.from({ length: Math.max(0, BOM_TABLE_ROWS - selectedBomItems.length - 1) }).map((_, idx) => (
@@ -748,13 +942,12 @@ export default function BomManagement() {
                         if (normText(bomForm.item_type) === "finished_good") {
                           const bomSaved = await persistBomEssentials(resolvedItemId);
                           if (!bomSaved) return;
-                          setNotice("Item and BOM saved. You can now add BOM lines.");
+                          setNotice("Item and BOM saved. Form cleared.");
                         } else {
-                          setSelectedBomId("");
-                          setSelectedBomItems([]);
-                          setNotice("Item saved to Inventory. Set Item Type to finished_good if you want BOM lines.");
+                          setNotice("Item saved to inventory. Form cleared.");
                         }
                         await loadData();
+                        resetCreateItemForm();
                       } catch (e) {
                         setError(getErrorMessage(e));
                       }

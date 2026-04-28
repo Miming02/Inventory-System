@@ -6,6 +6,7 @@ const ALLOWED_TABLES = new Set([
   "roles",
   "profiles",
   "categories",
+  "locations",
   "suppliers",
   "inventory_items",
   "purchase_orders",

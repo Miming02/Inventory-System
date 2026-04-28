@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { getErrorMessage } from "../../lib/errors";
 import { useAuth } from "../../contexts/AuthContext";
+import { useDistinctLocations } from "../../lib/useDistinctLocations";
 
 const COUNT_PAGE_SIZE = 14;
 
@@ -60,9 +61,54 @@ function StatusBadge({ status }) {
   );
 }
 
+function RenderSafeSelect({
+  value,
+  onChange,
+  options,
+  placeholder = "Select...",
+  wrapperClassName = "",
+  inputClassName = "",
+  disabled = false,
+}) {
+  const normalizedOptions = Array.isArray(options) ? options : [];
+  const selectedLabel =
+    normalizedOptions.find((opt) => String(opt.value) === String(value))?.label ??
+    (value ? String(value) : "");
+
+  return (
+    <div className={`relative ${wrapperClassName}`}>
+      <input
+        readOnly
+        value={selectedLabel}
+        placeholder={placeholder}
+        className={`pointer-events-none w-full ${inputClassName}`}
+      />
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-500">
+        <span className="material-symbols-outlined text-[16px]">expand_more</span>
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        disabled={disabled}
+      >
+        <option value="">{placeholder}</option>
+        {value && !normalizedOptions.some((opt) => String(opt.value) === String(value)) ? (
+          <option value={value}>{value}</option>
+        ) : null}
+        {normalizedOptions.map((opt) => (
+          <option key={`${opt.value}`} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export default function CountInventory() {
   const { profile } = useAuth();
-  const [locations, setLocations] = useState([]);
+  const locations = useDistinctLocations(true);
   const [selectedLocation, setSelectedLocation] = useState("");
   const [itemOptions, setItemOptions] = useState([]);
   const [lineItems, setLineItems] = useState([]);
@@ -86,22 +132,6 @@ export default function CountInventory() {
 
   const selectedItem =
     itemOptions.find((item) => String(item.id) === String(lineDraft.itemId)) ?? null;
-
-  const loadLocations = useCallback(async () => {
-    const { data, error: e } = await supabase
-      .from("inventory_items")
-      .select("location")
-      .not("location", "is", null)
-      .eq("is_active", true)
-      .limit(5000);
-    if (e) return;
-    const values = new Set();
-    for (const row of data ?? []) {
-      const location = String(row.location || "").trim();
-      if (location) values.add(location);
-    }
-    setLocations(Array.from(values).sort((a, b) => a.localeCompare(b)));
-  }, []);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -135,10 +165,6 @@ export default function CountInventory() {
   }, [selectedLocation]);
 
   useEffect(() => {
-    loadLocations();
-  }, [loadLocations]);
-
-  useEffect(() => {
     loadItems();
   }, [loadItems]);
 
@@ -158,7 +184,10 @@ export default function CountInventory() {
   const addLineItem = (event) => {
     if (event?.preventDefault) event.preventDefault();
     setError("");
-    const item = selectedItem;
+    const item =
+      selectedItem ??
+      itemOptions.find((row) => String(row.id) === String(lineDraft.itemId)) ??
+      null;
     if (!item?.id) {
       setError("SKU is required.");
       return;
@@ -168,31 +197,46 @@ export default function CountInventory() {
       setError("Counted Quantity must be zero or greater.");
       return;
     }
-    const already = lineItems.some((row) => String(row.itemId) === String(item.id));
-    if (already) {
-      setError("This SKU is already added. Edit it directly in the table.");
-      return;
-    }
-
     const currentQuantity = Number(item.current_stock ?? 0);
     const variance = countedQuantity - currentQuantity;
     const unitCost = Number(item.unit_cost ?? 0);
     const adjustmentValue = variance * (Number.isFinite(unitCost) ? unitCost : 0);
 
-    setLineItems((prev) => [
-      ...prev,
-      {
-        id: `${item.id}-${Date.now()}`,
-        itemId: item.id,
-        sku: item.sku || "—",
-        itemName: item.name || "—",
-        currentQuantity,
-        countedQuantity,
-        variance,
-        adjustmentValue,
-      },
-    ]);
+    setLineItems((prev) => {
+      const existingIndex = prev.findIndex((row) => String(row.itemId) === String(item.id));
+      if (existingIndex >= 0) {
+        return prev.map((row, index) =>
+          index === existingIndex
+            ? {
+                ...row,
+                countedQuantity,
+                variance,
+                adjustmentValue,
+              }
+            : row
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: `${item.id}-${Date.now()}`,
+          itemId: item.id,
+          sku: item.sku || "—",
+          itemName: item.name || "—",
+          currentQuantity,
+          countedQuantity,
+          variance,
+          adjustmentValue,
+        },
+      ];
+    });
     setLineDraft({ itemId: "", countedQuantity: "" });
+  };
+
+  const handleDraftKeyDown = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addLineItem();
   };
 
   const updateCountedQuantity = (rowId, rawValue) => {
@@ -262,6 +306,18 @@ export default function CountInventory() {
         }
 
         const activeSessionId = await ensureCountSession();
+
+        if (nextStatus === "reconciled") {
+          const { error: rpcError } = await supabase.rpc("process_stock_count_review", {
+            p_count_id: activeSessionId,
+            p_action: "approve",
+            p_review_notes: `Finalized from Count page by ${countedByLabel} on ${countDate}`,
+          });
+          if (rpcError) throw rpcError;
+          setCountSessionStatus("reconciled");
+          setSaveMessage("Count reconciled and inventory stock updated.");
+          return;
+        }
 
         const { error: deleteError } = await supabase
           .from("stock_count_items")
@@ -336,18 +392,20 @@ export default function CountInventory() {
           <div className="relative mx-auto w-full overflow-hidden rounded-[1.4rem] border border-outline-variant/15 bg-gradient-to-b from-surface-container-lowest to-surface shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
             <div className="min-h-[calc(100dvh-5.2rem)]">
               <div className="relative h-[calc(100dvh-6.3rem)] min-h-0 overflow-hidden bg-transparent p-1 sm:p-1.5 lg:p-2 flex flex-col">
-                <Link
-                  to="/dashboard"
-                  className="absolute right-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant/20 bg-white text-on-surface-variant transition-all hover:border-error/20 hover:text-error"
-                  aria-label="Close count page"
-                  title="Close"
-                >
-                  <span className="material-symbols-outlined text-[16px]">close</span>
-                </Link>
                 <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1.15rem] border border-slate-200/70 bg-white/90 shadow-[0_8px_20px_rgba(15,23,42,0.06)]">
                   <div className="flex items-start justify-between rounded-t-[1.15rem] bg-primary px-3 py-2.5 text-white">
                     <h2 className="font-headline text-sm font-extrabold tracking-tight text-white">Inventory Count</h2>
-                    <StatusBadge status={countSessionStatus} />
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={countSessionStatus} />
+                      <Link
+                        to="/dashboard"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/35 bg-white/15 text-white transition-all hover:border-white/70 hover:bg-white/25"
+                        aria-label="Close count page"
+                        title="Close"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </Link>
+                    </div>
                   </div>
 
                   <div className="flex h-full min-h-0 flex-col space-y-1 p-2 pt-0 overflow-hidden">
@@ -367,19 +425,14 @@ export default function CountInventory() {
                           <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
                             Location *
                           </label>
-                          <select
+                          <RenderSafeSelect
                             value={selectedLocation}
-                            onChange={(e) => setSelectedLocation(e.target.value)}
+                            onChange={setSelectedLocation}
+                            placeholder="Select location..."
+                            options={locations.map((location) => ({ value: location, label: location }))}
+                            inputClassName="h-5 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-900"
                             disabled={saving}
-                            className="h-5 w-full rounded-md border-none bg-white px-1.5 text-[10px] text-slate-900"
-                          >
-                            <option value="">Select location...</option>
-                            {locations.map((location) => (
-                              <option key={location} value={location}>
-                                {location}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </div>
                         <div className="space-y-0.5 rounded-md border border-slate-200 bg-slate-50/70 p-1">
                           <label className="text-[8px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
@@ -467,19 +520,17 @@ export default function CountInventory() {
 
                               <tr className="bg-slate-50/70">
                                 <td className="px-1.5 py-1">
-                                  <select
+                                  <RenderSafeSelect
                                     value={lineDraft.itemId}
-                                    onChange={(e) => setLineDraft((prev) => ({ ...prev, itemId: e.target.value }))}
+                                    onChange={(nextItemId) => setLineDraft((prev) => ({ ...prev, itemId: nextItemId }))}
+                                    placeholder={loading ? "Loading..." : "Select SKU..."}
+                                    options={itemOptions.map((item) => ({
+                                      value: item.id,
+                                      label: `${item.sku} - ${item.name || "Item"}`,
+                                    }))}
+                                    inputClassName="h-6 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-900"
                                     disabled={loading || saving || !selectedLocation || countSessionStatus === "reconciled"}
-                                    className="h-6 w-full rounded-md border-none bg-white px-1.5 text-[10px]"
-                                  >
-                                    <option value="">{loading ? "Loading..." : "Select SKU..."}</option>
-                                    {itemOptions.map((item) => (
-                                      <option key={item.id} value={item.id}>
-                                        {item.sku} - {item.name || "Item"}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  />
                                 </td>
                                 <td className="px-1.5 py-1">
                                   <input
@@ -493,6 +544,7 @@ export default function CountInventory() {
                                   <input
                                     value={lineDraft.countedQuantity}
                                     onChange={(e) => setLineDraft((prev) => ({ ...prev, countedQuantity: e.target.value }))}
+                                    onKeyDown={handleDraftKeyDown}
                                     type="number"
                                     min="0"
                                     className="h-6 w-full rounded-md border-none bg-white px-1.5 text-center text-[10px]"
@@ -508,7 +560,7 @@ export default function CountInventory() {
                                     disabled={saving || loading || countSessionStatus === "reconciled"}
                                     className="text-[9px] font-semibold text-primary/80 disabled:opacity-50"
                                   >
-                                    Enter
+                                    Add
                                   </button>
                                 </td>
                               </tr>

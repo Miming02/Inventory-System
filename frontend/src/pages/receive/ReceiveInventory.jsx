@@ -20,6 +20,18 @@ function profileDisplayName(profile) {
   return profile.email || "Inventory user";
 }
 
+function formatReceiveStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  if (value === "draft") return "Draft";
+  if (value === "pending_approval") return "Pending Approval";
+  if (value === "approved") return "Approved";
+  if (value === "partially_received") return "Partially Received";
+  if (value === "received") return "Received";
+  if (value === "returned") return "Returned";
+  if (value === "cancelled") return "Cancelled";
+  return status || "Unknown";
+}
+
 export default function ReceiveInventory() {
   const [searchParams] = useSearchParams();
   const { profile, role } = useAuth();
@@ -310,7 +322,7 @@ export default function ReceiveInventory() {
                 {receiveSuccess.unitCount === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-on-surface-variant mt-1">
-                Status: {receiveSuccess.workflowStatus} · Total Cost: {Number(receiveSuccess.totalCost || 0).toFixed(2)}
+                Status: {formatReceiveStatus(receiveSuccess.workflowStatus)} · Total Cost: {Number(receiveSuccess.totalCost || 0).toFixed(2)}
               </p>
               {receiveSuccess.transactionNumber ? (
                 <p className="text-xs text-on-surface-variant mt-1">Transaction: {receiveSuccess.transactionNumber}</p>

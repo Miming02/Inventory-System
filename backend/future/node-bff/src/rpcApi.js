@@ -220,8 +220,16 @@ async function processReceiveTransactionReview(client, params) {
       "SELECT * FROM public.receive_transaction_items WHERE receive_transaction_id = $1",
       [txn.id]
     );
+    let totalQty = 0;
+    let totalApprovedQty = 0;
+    let hasIssueQty = false;
     for (const item of itemRows.rows) {
-      const approvedQty = Math.max(0, Number(item.quantity || 0) - Number(item.issue_quantity || 0));
+      const itemQty = Math.max(0, Number(item.quantity || 0));
+      const issueQty = Math.max(0, Number(item.issue_quantity || 0));
+      const approvedQty = Math.max(0, itemQty - issueQty);
+      totalQty += itemQty;
+      totalApprovedQty += approvedQty;
+      hasIssueQty = hasIssueQty || issueQty > 0;
       if (approvedQty > 0) {
         await client.query(
           `INSERT INTO public.stock_movements
@@ -230,7 +238,7 @@ async function processReceiveTransactionReview(client, params) {
           [
             item.item_id,
             txn.id,
-            Math.ceil(approvedQty),
+            approvedQty,
             item.unit_cost || null,
             item.location || null,
             `Receive approved: ${txn.transaction_number}`,
@@ -244,13 +252,29 @@ async function processReceiveTransactionReview(client, params) {
           `UPDATE public.purchase_order_items
            SET quantity_received = COALESCE(quantity_received, 0) + $2
            WHERE id = $1`,
-          [item.po_line_id, Math.ceil(approvedQty)]
+          [item.po_line_id, approvedQty]
         );
       }
     }
+
+    const finalStatus =
+      totalApprovedQty <= 0 && hasIssueQty
+        ? "returned"
+        : hasIssueQty || totalApprovedQty + 1e-9 < totalQty
+          ? "partially_received"
+          : "received";
+
+    const updated = await client.query(
+      `UPDATE public.receive_transactions
+       SET status = $2, reviewed_by = $3, reviewed_at = NOW(), review_notes = $4, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [txn.id, finalStatus, actorId, reviewNotes]
+    );
+    return updated.rows[0];
   }
 
-  const status = action === "approve" ? "approved" : action === "reject" ? "rejected" : "returned";
+  const status = action === "reject" ? "cancelled" : "returned";
   const updated = await client.query(
     `UPDATE public.receive_transactions
      SET status = $2, reviewed_by = $3, reviewed_at = NOW(), review_notes = $4, updated_at = NOW()

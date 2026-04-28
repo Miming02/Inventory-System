@@ -24,6 +24,10 @@ function workflowActionLabel() {
   return "Submit for Approval";
 }
 
+function isPresent(value) {
+  return String(value || "").trim().length > 0;
+}
+
 const WHITE_FIELD_THEME = "[&_input]:!bg-white [&_select]:!bg-white [&_textarea]:!bg-white";
 
 function useModalA11y(open, onClose) {
@@ -313,8 +317,11 @@ export function ScanItemsModal({ open, onClose, onReviewDone, inline = false, co
     const qty = Number(quantity);
     if (!matched?.id) return setFormError("Scan or select a valid SKU.");
     if (!Number.isFinite(qty) || qty <= 0) return setFormError("Quantity must be greater than 0.");
+    if (!isPresent(supplier)) return setFormError("Supplier is required.");
+    if (!isPresent(receivedDate)) return setFormError("Received Date is required.");
     if (!location) return setFormError("Location is required.");
     if (!receivedBy.trim()) return setFormError("Received By is required.");
+    if (!Number.isFinite(Number(unitCost)) || Number(unitCost) <= 0) return setFormError("Unit Cost is required.");
     if (conditionTag === "damaged" || conditionTag === "returned") {
       setPendingAddRow({ matched, qty });
       setPendingIssueQty(qty);
@@ -328,6 +335,14 @@ export function ScanItemsModal({ open, onClose, onReviewDone, inline = false, co
   const handleFinalize = async (submitIntent = "submit") => {
     if (queue.length === 0) {
       setFormError("Add at least one scanned item before finalizing.");
+      return;
+    }
+    if (!isPresent(supplier)) {
+      setFormError("Supplier is required.");
+      return;
+    }
+    if (!isPresent(receivedDate)) {
+      setFormError("Received Date is required.");
       return;
     }
     setSaving(true);
@@ -708,7 +723,8 @@ export function ManualEntryModal({ open, onClose, onReviewDone, inline = false, 
         .select(
           "id,po_number,status,supplier_id,expected_delivery_date,created_at,notes,suppliers(name),purchase_order_items(id,item_id,quantity_ordered,quantity_received,unit_price,inventory_items(sku,name))"
         )
-        .in("status", ["confirmed", "sent"])
+        // Only allow receiving from already-approved / confirmed POs.
+        .in("status", ["confirmed"])
         .order("created_at", { ascending: false })
         .limit(300),
       supabase
@@ -937,8 +953,11 @@ export function ManualEntryModal({ open, onClose, onReviewDone, inline = false, 
     if (!matched?.id) return setFormError("Selected PO line is missing inventory item.");
     if (!Number.isFinite(qty) || qty <= 0) return setFormError("Enter a quantity greater than 0.");
     if (!unitValue) return setFormError("Unit is required.");
+    if (!isPresent(supplier)) return setFormError("Supplier is required.");
+    if (!isPresent(receivedDate)) return setFormError("Received Date is required.");
     if (!location) return setFormError("Location is required.");
     if (!receivedBy.trim()) return setFormError("Received By is required.");
+    if (!Number.isFinite(Number(unitCost)) || Number(unitCost) <= 0) return setFormError("Unit Cost is required.");
     if (conditionTag === "damaged" || conditionTag === "returned") {
       setPendingAddPayload({ matched, qty, unitValue });
       setPendingIssueQty(qty);
@@ -992,6 +1011,14 @@ export function ManualEntryModal({ open, onClose, onReviewDone, inline = false, 
     }
     if (queue.length === 0) {
       setFormError("Add at least one line before submitting.");
+      return;
+    }
+    if (!isPresent(supplier)) {
+      setFormError("Supplier is required.");
+      return;
+    }
+    if (!isPresent(receivedDate)) {
+      setFormError("Received Date is required.");
       return;
     }
     setFormError("");
@@ -1189,7 +1216,7 @@ export function ManualEntryModal({ open, onClose, onReviewDone, inline = false, 
                   </div>
                 </div>
                 <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-slate-200">
-                  <div className="h-full min-h-[260px] overflow-x-auto overflow-y-hidden">
+                  <div className="h-full min-h-0 overflow-x-auto overflow-y-auto">
                   <table className="w-full min-w-[920px] table-fixed text-left text-[10px]">
                     <thead className="sticky top-0 z-10 bg-slate-100">
                       <tr>
@@ -1522,6 +1549,7 @@ export function BatchUploadModal({ open, onClose, onReviewDone, inline = false, 
 
   const handleConfirm = async (submitIntent = "submit") => {
     setFormError("");
+    if (!supplier.trim()) return setFormError("Supplier is required.");
     if (!receivedBy.trim()) return setFormError("Received By is required.");
     if (!receivedDate) return setFormError("Received Date is required.");
     if (rows.length === 0) return setFormError("Upload a CSV or Excel file with rows.");

@@ -54,6 +54,17 @@ export function useDistinctLocations(when) {
         }
       }
 
+      // Include standalone locations created from Manage Locations page.
+      const savedLocations = await supabase.from("locations").select("name").limit(2500);
+      if (!savedLocations.error) {
+        for (const row of savedLocations.data ?? []) {
+          const v = normalizeLocation(row.name);
+          if (!v) continue;
+          const key = v.toLowerCase();
+          if (!locationByKey.has(key)) locationByKey.set(key, v);
+        }
+      }
+
       // Always merge legacy locations so dropdowns stay synced in mixed environments.
       const legacy = await supabase
         .from("inventory_items")
@@ -82,6 +93,27 @@ export function useDistinctLocations(when) {
           if (!v) continue;
           const key = v.toLowerCase();
           if (!locationByKey.has(key)) locationByKey.set(key, v);
+        }
+      }
+
+      // Merge locations seen in stock movements so screens that rely on
+      // this hook (Receive/Produce/etc.) can show transfer/storage locations too.
+      const movementLocations = await supabase
+        .from("stock_movements")
+        .select("from_location,to_location")
+        .limit(2500);
+      if (!movementLocations.error) {
+        for (const row of movementLocations.data ?? []) {
+          const from = normalizeLocation(row.from_location);
+          const to = normalizeLocation(row.to_location);
+          if (from) {
+            const key = from.toLowerCase();
+            if (!locationByKey.has(key)) locationByKey.set(key, from);
+          }
+          if (to) {
+            const key = to.toLowerCase();
+            if (!locationByKey.has(key)) locationByKey.set(key, to);
+          }
         }
       }
 

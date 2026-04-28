@@ -10,21 +10,18 @@ export default function ManageLocations() {
   const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
-  const [itemOptions, setItemOptions] = useState([]);
   const [useLegacyLocations, setUseLegacyLocations] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
-    seedItemId: "",
-    seedQuantity: "0",
   });
 
   const loadLocations = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     setUseLegacyLocations(false);
-    const [locRes, itemsRes] = await Promise.all([
+    const [savedLocRes, locRes] = await Promise.all([
+      supabase.from("locations").select("name,updated_at").order("name", { ascending: true }).limit(5000),
       supabase.from("inventory_item_locations").select("location,item_id,quantity,updated_at").order("location", { ascending: true }).limit(5000),
-      supabase.from("inventory_items").select("id,sku,name").order("name", { ascending: true }).limit(1000),
     ]);
 
     const locTableMissing =
@@ -32,6 +29,19 @@ export default function ManageLocations() {
       (getErrorMessage(locRes.error).includes("inventory_item_locations") ||
         locRes.error.code === "PGRST204" ||
         locRes.error.code === "42P01");
+
+    const appendSavedLocations = (grouped) => {
+      for (const row of savedLocRes.data ?? []) {
+        const loc = (row.name || "").trim();
+        if (!loc || grouped.has(loc)) continue;
+        grouped.set(loc, {
+          name: loc,
+          itemIds: new Set(),
+          totalQty: 0,
+          updatedAt: row.updated_at || null,
+        });
+      }
+    };
 
     if (locTableMissing) {
       setUseLegacyLocations(true);
@@ -64,6 +74,7 @@ export default function ManageLocations() {
             entry.updatedAt = row.updated_at;
           }
         }
+        appendSavedLocations(grouped);
         setRows(
           [...grouped.values()]
             .map((row) => ({
@@ -112,6 +123,7 @@ export default function ManageLocations() {
               entry.updatedAt = row.updated_at;
             }
           }
+          appendSavedLocations(grouped);
           setRows(
             [...grouped.values()]
               .map((row) => ({
@@ -143,6 +155,7 @@ export default function ManageLocations() {
             entry.updatedAt = row.updated_at;
           }
         }
+        appendSavedLocations(grouped);
         setRows(
           [...grouped.values()]
             .map((row) => ({
@@ -155,7 +168,6 @@ export default function ManageLocations() {
         );
       }
     }
-    if (!itemsRes.error) setItemOptions(itemsRes.data ?? []);
     setLoading(false);
   }, []);
 
@@ -173,8 +185,6 @@ export default function ManageLocations() {
     setEditingLocation(null);
     setFormData({
       name: "",
-      seedItemId: itemOptions[0]?.id || "",
-      seedQuantity: "0",
     });
     setShowAddModal(true);
   };
@@ -183,8 +193,6 @@ export default function ManageLocations() {
     setEditingLocation(row);
     setFormData({
       name: row.name,
-      seedItemId: itemOptions[0]?.id || "",
-      seedQuantity: "0",
     });
     setShowAddModal(true);
   };
@@ -201,37 +209,23 @@ export default function ManageLocations() {
     setLoadError("");
 
     if (editingLocation) {
-      const { error } = useLegacyLocations
-        ? await supabase.from("inventory_items").update({ location: newName, updated_at: new Date().toISOString() }).eq("location", editingLocation.name)
-        : await supabase
-            .from("inventory_item_locations")
-            .update({ location: newName, updated_at: new Date().toISOString() })
-            .eq("location", editingLocation.name);
-      if (error) {
-        setLoadError(getErrorMessage(error));
+      const nowIso = new Date().toISOString();
+      const [{ error: locationErr }, { error: invLocErr }, { error: legacyErr }] = await Promise.all([
+        supabase.from("locations").update({ name: newName, updated_at: nowIso }).eq("name", editingLocation.name),
+        supabase.from("inventory_item_locations").update({ location: newName, updated_at: nowIso }).eq("location", editingLocation.name),
+        useLegacyLocations
+          ? supabase.from("inventory_items").update({ location: newName, updated_at: nowIso }).eq("location", editingLocation.name)
+          : Promise.resolve({ error: null }),
+      ]);
+      if (locationErr || invLocErr || legacyErr) {
+        setLoadError(getErrorMessage(locationErr || invLocErr || legacyErr));
         return;
       }
     } else {
-      if (!formData.seedItemId) {
-        setLoadError("Select a seed item first.");
-        return;
-      }
-      const quantity = Number(formData.seedQuantity || 0);
-      if (Number.isNaN(quantity) || quantity < 0) {
-        setLoadError("Seed quantity must be 0 or higher.");
-        return;
-      }
-      const { error } = useLegacyLocations
-        ? await supabase.from("inventory_items").update({ location: newName, updated_at: new Date().toISOString() }).eq("id", formData.seedItemId)
-        : await supabase.from("inventory_item_locations").upsert(
-            {
-              item_id: formData.seedItemId,
-              location: newName,
-              quantity,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "item_id,location" }
-          );
+      const { error } = await supabase.from("locations").insert({
+        name: newName,
+        updated_at: new Date().toISOString(),
+      });
       if (error) {
         setLoadError(getErrorMessage(error));
         return;
@@ -249,11 +243,16 @@ export default function ManageLocations() {
     }
     const ok = window.confirm(`Delete location "${row.name}"?`);
     if (!ok) return;
-    const { error } = useLegacyLocations
-      ? await supabase.from("inventory_items").update({ location: null, updated_at: new Date().toISOString() }).eq("location", row.name)
-      : await supabase.from("inventory_item_locations").delete().eq("location", row.name);
-    if (error) {
-      setLoadError(getErrorMessage(error));
+    const nowIso = new Date().toISOString();
+    const [{ error: locationErr }, { error: invLocErr }, { error: legacyErr }] = await Promise.all([
+      supabase.from("locations").delete().eq("name", row.name),
+      supabase.from("inventory_item_locations").delete().eq("location", row.name),
+      useLegacyLocations
+        ? supabase.from("inventory_items").update({ location: null, updated_at: nowIso }).eq("location", row.name)
+        : Promise.resolve({ error: null }),
+    ]);
+    if (locationErr || invLocErr || legacyErr) {
+      setLoadError(getErrorMessage(locationErr || invLocErr || legacyErr));
       return;
     }
     await loadLocations();
@@ -395,7 +394,7 @@ export default function ManageLocations() {
                   <p className="text-xs text-on-surface-variant">
                     {editingLocation
                       ? "Update location name across per-location stock records."
-                      : "Create a location entry linked to one inventory item."}
+                      : "Create a standalone location entry."}
                   </p>
                 </div>
                 <button type="button" onClick={() => setShowAddModal(false)} className="rounded-full p-2 text-outline transition-all hover:bg-surface-container-high">
@@ -415,40 +414,6 @@ export default function ManageLocations() {
                   required
                 />
               </div>
-
-              {!editingLocation ? (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <label className="block px-1 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Seed Item *</label>
-                  <select
-                    value={formData.seedItemId}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, seedItemId: e.target.value }))}
-                    className="w-full appearance-none rounded-xl border-none bg-surface-container-highest px-4 py-3 text-sm text-on-surface transition-all focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary/20"
-                    required
-                  >
-                    <option value="" disabled>
-                      Select item...
-                    </option>
-                    {itemOptions.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.sku ? `${item.sku} - ${item.name}` : item.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block px-1 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Initial Qty</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.seedQuantity}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, seedQuantity: e.target.value }))}
-                    className="w-full rounded-xl border-none bg-surface-container-highest px-4 py-3 text-sm text-on-surface transition-all placeholder:text-outline-variant focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary/20"
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-              ) : null}
 
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button type="button" onClick={closeModal} className="rounded-full px-6 py-2.5 text-sm font-semibold text-secondary transition-all hover:bg-secondary-container/30">

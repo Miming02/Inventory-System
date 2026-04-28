@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { normalizeRole } from '../lib/roleAccess'
 
@@ -32,6 +32,8 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const currentUserIdRef = useRef(null)
+  const currentProfileRef = useRef(null)
 
   const mapExternalUserToProfile = useCallback((row, authUser) => {
     if (!row) return null
@@ -167,11 +169,30 @@ export function AuthProvider({ children }) {
   }, [])
 
   useEffect(() => {
+    currentUserIdRef.current = user?.id ?? null
+  }, [user])
+
+  useEffect(() => {
+    currentProfileRef.current = profile
+  }, [profile])
+
+  useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const authUser = session?.user ?? null
+      const nextUserId = authUser?.id ?? null
+      const currentUserId = currentUserIdRef.current
+      const isSameUserSession = Boolean(nextUserId) && nextUserId === currentUserId
+      const hasResolvedProfile = Boolean(currentProfileRef.current)
       setUser(authUser)
 
       if (event === 'TOKEN_REFRESHED') {
+        return
+      }
+
+      // Avoid route flicker/redirect on tab focus when session user did not change.
+      // Supabase can emit auth events while app is backgrounded/foregrounded.
+      if (isSameUserSession && hasResolvedProfile) {
+        void syncUserToExternalDb(authUser, currentProfileRef.current)
         return
       }
 

@@ -97,16 +97,27 @@ function CreatePOPageForm({ supplierOptions, inventoryItemOptions, onCreated, cr
   }, [supplierOptions, supplierQuery, selectedSupplier]);
 
   const filteredInventoryItems = useMemo(() => {
+    const addedIds = new Set(
+      (formData.items ?? [])
+        .map((item) => String(item.inventoryItemId || "").trim())
+        .filter(Boolean)
+    );
+    const availableOptions = (inventoryItemOptions ?? []).filter((item) => {
+      const id = String(item?.id || "").trim();
+      if (!id) return false;
+      if (id === String(newItem.inventoryItemId || "").trim()) return true;
+      return !addedIds.has(id);
+    });
     const q = itemQuery.trim().toLowerCase();
     const selectedCode = selectedInventoryItem ? displayItemCode(selectedInventoryItem).trim().toLowerCase() : "";
-    if (q && selectedCode && q === selectedCode) return inventoryItemOptions ?? [];
-    if (!q) return inventoryItemOptions ?? [];
-    return (inventoryItemOptions ?? []).filter((item) => {
+    if (q && selectedCode && q === selectedCode) return availableOptions;
+    if (!q) return availableOptions;
+    return availableOptions.filter((item) => {
       const sku = String(item?.sku || "").toLowerCase();
       const name = String(item?.name || "").toLowerCase();
       return sku.includes(q) || name.includes(q);
     });
-  }, [inventoryItemOptions, itemQuery, selectedInventoryItem]);
+  }, [inventoryItemOptions, formData.items, itemQuery, selectedInventoryItem, newItem.inventoryItemId]);
 
   useEffect(() => {
     const selected = (supplierOptions ?? []).find((s) => String(s.id) === String(formData.supplier));
